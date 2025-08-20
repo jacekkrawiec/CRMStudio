@@ -1,0 +1,68 @@
+# CRMStudio - IRB Model Monitoring Toolkit
+
+CRMStudio is a Python package designed for monitoring IRB models (PD, LGD, EAD) locally within your bank infrastructure. It helps you run monitoring checks, evaluate metrics, trigger alerts, and generate reports — all **without sharing sensitive data externally**.
+
+---
+
+## Quickstart
+
+Get started with CRMStudio in just a few steps:
+
+### 1. Install
+
+```bash
+pip install crmstudio
+```
+
+### 2. Prepare Configuration
+
+Create a YAML config (e.g., config/monitoring_config.yaml) specifying models, metrics, and thresholds:
+
+```yaml
+models:
+  pd_model:
+    metrics: [psi, gini, ks]
+    thresholds:
+      psi: 0.25
+      gini: 0.6
+report:
+  output_dir: reports/
+  format: html
+```
+
+### 3. Local Data
+
+```python
+from crmstudio.data.loader import DataLoader
+data = DataLoader("data/pd_data.csv").load()
+```
+
+### 4. Run Monitoring
+
+```python
+from crmstudio.monitoring.pipeline import MonitoringPipeline
+MonitoringPipeline(config_path = "config/monitoring_config.yaml").run()
+```
+
+### 5. Generate Report
+
+```python
+from crmstudio.reports.generator import ReportGenerator
+ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
+
+- [x] Done! Your model metrics are calculated, alerts triggered if thresholds are exceeded, and reports are ready.
+```
+
+## Features
+
+- **Data Quality Checks**: Validate data integrity with various checks.
+- **Monitoring Checks**: Continuously monitor model performance and trigger alerts.
+- **Report Generation**: Generate customizable reports for regulatory compliance and internal review.
+
+## Contributing
+
+Contributions are welcome! Please read the [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
