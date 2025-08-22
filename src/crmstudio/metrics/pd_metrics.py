@@ -1,3 +1,4 @@
+import math
 from ..core.base import BaseMetric, MetricResult
 import numpy as np
 from scipy import stats
@@ -19,7 +20,7 @@ class AUC(BaseMetric):
         :return: AUC score as a MetricResult object.
         """
         auc_score = roc_auc_score(y_true, y_pred)
-        return auc_score
+        return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
 
 class AUCDelta(BaseMetric):
     """
@@ -33,39 +34,118 @@ class AUCDelta(BaseMetric):
     Reference: 
     https://www.bankingsupervision.europa.eu/activities/internal_models/shared/pdf/instructions_validation_reporting_credit_risk.en.pdf
     """
-    def _compute_raw(self, y_true, y_pred, y_true_prev=None, y_pred_prev=None, **kwargs):
-        if y_true_prev is None or y_pred_prev is None:
-            raise ValueError("Previous period data required for AUC delta calculation")
-        
-        # Calculate AUCs
-        auc_curr = roc_auc_score(y_true, y_pred)
-        auc_init = roc_auc_score(y_true_prev, y_pred_prev)
-        delta = auc_curr - auc_init
-        
-        # Calculate variance components for current period
-        n1_curr = np.sum(y_true) # |A|
-        n0_curr = len(y_true) - n1_curr # |B|
-        q1_curr = auc_curr / 2
-        q2_curr = 2 * auc_curr ** 2 / (1 + auc_curr)
-        var_curr = (auc_curr * (1 - auc_curr) + 
-                   (n1_curr - 1) * (q1_curr - auc_curr ** 2) + 
-                   (n0_curr - 1) * (q2_curr - auc_curr ** 2)) / (n1_curr * n0_curr)
+    # ------- Core ECB Annex 1 helper -------
+    @staticmethod
+    def _rowwise_u_components(def_scores: np.ndarray, ndef_scores_sorted: np.ndarray) -> Tuple[np.ndarray,np.ndarray]:
+        """
+        For each defaulter score 'a' compute:
+            - rowU_a = count_b[ r(a) < r(b) ] + 0.5 * count_b[ r(a) == r(b) ]
+            - V10_a = rowU_a / |B|
+        Returns (rowU vector over A, V10 vector over A)
+        """
+        ndef = len(ndef_scores_sorted)
+        rowU = np.array([np.sum(def_scores[i] > ndef_scores_sorted) + 0.5 * np.sum(def_scores[i] == ndef_scores_sorted) for i in range(len(def_scores))])
+        V10 = rowU / ndef if ndef > 0 else np.zeros_like(rowU)
+        return rowU, V10
+    
+    @staticmethod
+    def _colwise_u_components(ndef_scores: np.ndarray, def_scores_sorted: np.ndarray) -> np.ndarray:
+        """
+        For each non-defaulter score 'b' compute:
+            - colU_b = count_a[ r(a) < r(b) ] + 0.5 * count_a[ r(a) == r(b) ]
+            - V01_b = colU_b / |A|
+        Returns V01 vector over B
+        """
+        ndef = len(def_scores_sorted)
+        colU = np.array([np.sum(ndef_scores[i] > def_scores_sorted) + 0.5 * np.sum(ndef_scores[i] == def_scores_sorted) for i in range(len(ndef_scores))])
+        V01 = colU / ndef if ndef > 0 else np.zeros_like(colU)
+        return V01
 
-        # Calculate standard error and test statistic
-        s = np.sqrt(var_curr)
-        S = delta / s
+    @staticmethod
+    def _unbiased_variance(x: np.ndarray) -> float:
+        """
+        Unbiased variance estimator
+        """
+        n = len(x)
+        if n <= 1:
+            return 0.0
+        return float(np.var(x, ddof=1))
+
+    @staticmethod
+    def _auc_and_variance(y_true: np.ndarray, y_pred: np.ndarray, higher_better: bool) -> Tuple[float, float, int, int]:
+        """
+        Calculate AUC and its variance based on ECB's validation instruction.
+        """
+        # sanitize
+        mask = np.isfinite(y_pred) & np.isfinite(y_true) #checks for NaN and Inf
+        y = y_true[mask].astype(int)
+        s = y_pred[mask].astype(float)
+
+        if not higher_better:
+            s = -s
+
+        # Separate scores into defaulters and non-defaulters
+        A = s[y == 1] # defaulters
+        B = s[y == 0] # non-defaulters
         
-        # Calculate p-value
+        nA = len(A)
+        nB = len(B)
+        
+        if nA == 0 or nB == 0:
+            raise ValueError("AUC requires at least one defaulted (y_true = 1) and one non-defaulter (y_true = 0).")
+        
+        # Sort scores
+        B_sorted = np.sort(B)
+        A_sorted = np.sort(A)
+        
+        # Compute U components
+        rowU_A, V10 = AUCDelta._rowwise_u_components(A, B_sorted)
+        V01 = AUCDelta._colwise_u_components(B, A_sorted)
+        
+        # Calculate AUC
+        auc = float(np.sum(rowU_A)) / (nA * nB)
+        
+        # Calculate variance
+        var_V10 = AUCDelta._unbiased_variance(V10)
+        var_V01 = AUCDelta._unbiased_variance(V01)
+        
+        var_auc = (var_V10 / nA) + (var_V01 / nB)
+        
+        return auc, var_auc, nA, nB
+
+    def _compute_raw(self, y_true, y_pred, y_true_prev=None, y_pred_prev=None, **kwargs):
+        auc_curr, s2, nA, nB = self._auc_and_variance(
+            y_true=np.asarray(y_true), 
+            y_pred=np.asarray(y_pred),
+            higher_better=self.metric_config.get("params", {}).get("score_higher_is_better", True))
+        auc_init = self.metric_config.get("params", {}).get("initial_auc", None)
+        alpha = self.metric_config.get("params", {}).get("alpha", 0.05)
+        
+        if auc_init is None:
+            raise ValueError("Initial AUC (auc_init) must be provided in metric params.")
+        
+        s = math.sqrt(max(s2,0.0)) 
+        diff = auc_init - auc_curr
+
+        if s == 0:
+            S = math.inf if diff > 0 else -math.inf if diff < 0 else 0.0
+        else:
+            S = diff / s
+
         p_value = 1 - stats.norm.cdf(S)
-        
-        return {
-            "delta": delta,
-            "test_statistic": S,
+
+        details = {
+            "auc_curr": auc_curr, 
+            "auc_init": auc_init,
+            "variance": s2,
+            "nA": nA, 
+            "nB": nB, 
+            "S": S, 
             "p_value": p_value,
-            "auc_current": auc_curr,
-            "auc_initial": auc_init,
-            "std_error": s
+            "decision": "pass" if p_value > alpha else "fail"
         }
+        return float(p_value), details   
+      
 
 class ROCCurve(BaseMetric):
     """

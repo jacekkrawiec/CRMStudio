@@ -1,8 +1,10 @@
 # src/crmstudio/core/base.py
 from abc import ABC, abstractmethod
 from typing import Any, Dict
+import re
 
 from .config_loader import load_config
+from ..utils import helpers
 
 class BaseMetric(ABC):
     """
@@ -38,8 +40,12 @@ class BaseMetric(ABC):
         """
         Extract metric-specific configuration from loaded YAML or from kwargs overrides.
         """
+        class_pascal = self.__class__.__name__
+        class_snake = helpers.pascal_to_snake(class_pascal)
+        class_names = [class_pascal, class_snake]
+        class_names = [class_pascal, class_snake]
         metrics = self.config.get("models", {}).get(self.model_name, {}).get("metrics", [])
-        metrics_cfg = next((m for m in metrics if m["name"].lower() == self.__class__.__name__.lower()), {})
+        metrics_cfg = next((m for m in metrics if m["name"].lower() in class_names), {})
         return {**metrics_cfg, **kwargs}
 
     @abstractmethod
@@ -58,8 +64,20 @@ class BaseMetric(ABC):
         """
         Compute metric and wrap into MetricResult object.
         """
+        if self.metric_config.produce_figure:
+            figure_data = self._compute_raw(y_true, y_pred)
+            return FigureResult(
+                name=helpers.pascal_to_snake(self.__class__.__name__),
+                figure_data = figure_data,
+                details = {}
+            )
         # Merge config kwargs with compute kwargs
         value = self._compute_raw(y_true, y_pred)
+        if len(value) > 1: #this is wrong implementation, there can ve dictionary passed to value and will be len>1 but [1] won't work
+            details = value[1]
+            value = value[0]
+        else:
+            details = {}
         threshold = self.metric_config.get("threshold")
         passed = (threshold is None) or (value >= threshold)
         self.result = MetricResult(
@@ -67,7 +85,7 @@ class BaseMetric(ABC):
             value=value,
             threshold=threshold,
             passed=passed,
-            details = {"n_obs": len(y_true)}
+            details = details
         )
         return self.result
 
@@ -121,3 +139,37 @@ class MetricResult:
 
     def __repr__(self):
         return f"<MetricResult {self.name}: {self.value:.4f}, passed={self.passed}>"
+
+class FigureResult:
+    """
+    Encapsulates the result of a metric calculation that produces a figure.
+    """
+
+    def __init__(self, name, figure_data, details=Dict[str, Any]):
+        """
+        Parameters
+        ----------
+        name : str
+            Name of the metric.
+        figure_data : Any
+            Data needed to render the figure (e.g., plotly figure dict).
+        additional_info : dict, optional
+            Any extra information (e.g., p-value, n_obs, bins).
+        """
+        self.name = name
+        self.figure_data = figure_data
+        self.details = details or {}
+
+    def to_dict(self):
+        """
+        Returns standardized dictionary representation of the figure result.
+        Suitable for reporting to dashboards.
+        """
+        return {
+            "metric": self.name,
+            "figure_data": self.figure_data,
+            **self.details
+        }
+
+    def __repr__(self):
+        return f"<FigureResult {self.name}>"

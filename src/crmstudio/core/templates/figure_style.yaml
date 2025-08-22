@@ -1,0 +1,9 @@
+roc_curve:
+  line_color: "blue"
+  line_width: 2
+  line_style: "solid"
+  show_diagonal: true
+  diagonal_color: "grey"
+  diagonal_style: "dash"
+  diagonal_width: 1
+    
