@@ -1,0 +1,143 @@
+data_quality:
+  metrics:
+    - name: representativeness
+    - name: stability
+    - name: outliers
+    - name: completeness
+    - name: uniqueness
+
+models:
+  pd_model:
+    metrics:
+      # General metrics
+      - name: homogeneity
+        threshold: 0.7
+      - name: heterogeneity
+        threshold: 0.3
+      - name: distribution_fit
+        threshold: 0.05
+      - name: feature_importance
+        threshold: 0.1
+      - name: feature_stability
+        threshold: 0.1
+      - name: feature_correlation
+        threshold: 0.8
+      - name: feature_interaction
+        threshold: 0.05
+      - name: feature_relevance
+        threshold: 0.1
+      
+      # Calibration metrics
+      - name: jeffreys_test
+      - name: brier_score
+        threshold: 0.25
+      - name: reliability_diagrams
+      - name: normal_calibration_test
+      - name: binomial_calibration_test
+      - name: correlated_defaults_test
+      - name: chi_square_test
+        threshold: 0.05
+      - name: hosmer_lemeshow
+        threshold: 0.05
+      
+      # Discrimination metrics
+      - name: auc
+        threshold: 0.7
+      - name: auc_delta
+      - name: roc_curve
+      - name: pietra_index
+      - name: ks_stat
+        threshold: 0.4
+      - name: cap_curve
+      - name: gini
+        threshold: 0.4
+      - name: gini_ci
+        params:
+          confidence: 0.95
+      - name: cier
+        params:
+          n_bins: 10
+      - name: kl_distance
+        params:
+          n_bins: 10
+      - name: information_value
+        params:
+          n_bins: 10
+      - name: kendalls_tau
+      - name: accuracy_ratio
+      - name: spearmans_rho
+      
+      # Stability metrics
+      - name: migration_matrix
+      - name: migration_stability
+      - name: rating_concentration
+      - name: psi
+        threshold: 0.25
+      - name: csi
+        threshold: 0.25
+      - name: jensen_shannon
+        threshold: 0.05
+      - name: anova
+        threshold: 0.05
+
+  lgd_model:
+    metrics:
+      # Calibration metrics
+      - name: t_test
+        threshold: 0.05
+      - name: r_squared
+        threshold: 0.6
+      - name: rmse
+        threshold: 0.1
+      - name: correlation
+        threshold: 0.5
+      - name: mean_error
+        threshold: 0.05
+      - name: mse
+        threshold: 0.1
+      - name: mann_whitney
+        threshold: 0.05
+      
+      # Discrimination metrics
+      - name: gauc
+        threshold: 0.6
+      - name: gauc_delta
+      - name: spearmans_rho
+      - name: vus
+      - name: lorenz_curve
+      - name: somers_d
+      - name: kendalls_tau
+      
+      # Stability metrics
+      - name: psi
+        threshold: 0.25
+
+variables:
+  subranges:
+    - LTV
+    - CREDIT_SCORE
+    - INCOME
+    - AGE
+    - EMPLOYMENT_STATUS
+    - ARREARS
+    - EAD
+    - PD
+    - LGD
+  features:
+    - PD_score
+    - LGD_score
+    - intodefault_flag
+    - default_flag
+    - realized_lgd
+    - exposure_at_default
+
+reporting:
+  output_format: html
+  output_dir: reports/
+  include_plots: true
+  save_results: true
+
+alerts:
+  email: false
+  threshold_breach: true
+  export_format: json

@@ -1,3 +1,7 @@
 # crmstudio/src/crmstudio/metrics/__init__.py
 
-# This file is intentionally left blank.
+from .pd_metrics import AUC
+
+METRIC_REGISTRY = {
+    "AUC": AUC,
+}

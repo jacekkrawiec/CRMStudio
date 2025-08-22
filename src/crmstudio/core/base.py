@@ -1,40 +1,123 @@
-crmstudio
-├── src
-│   └── crmstudio
-│       ├── __init__.py
-│       ├── core
-│       │   ├── __init__.py
-│       │   ├── base.py
-│       │   └── config.py
-│       ├── data
-│       │   ├── __init__.py
-│       │   ├── loader.py
-│       │   └── validator.py
-│       ├── metrics
-│       │   ├── __init__.py
-│       │   ├── performance.py
-│       │   ├── quality.py
-│       │   └── stability.py
-│       ├── monitoring
-│       │   ├── __init__.py
-│       │   ├── alerts.py
-│       │   └── pipeline.py
-│       ├── reports
-│       │   ├── __init__.py
-│       │   ├── generator.py
-│       │   └── templates
-│       └── utils
-│           ├── __init__.py
-│           └── helpers.py
-├── tests
-│   ├── __init__.py
-│   ├── conftest.py
-│   └── unit
-│       ├── __init__.py
-│       └── test_metrics.py
-├── LICENSE
-├── MANIFEST.in
-├── README.md
-├── pyproject.toml
-├── requirements.txt
-└── setup.py
+# src/crmstudio/core/base.py
+from abc import ABC, abstractmethod
+from typing import Any, Dict
+
+from .config_loader import load_config
+
+class BaseMetric(ABC):
+    """
+    Abstract base class for all monitoring metrics.
+    All metrics (PD, LGD, EAD) should inherit from this class.
+    Thresholds and other parameters are taken from config.
+    """
+
+    def __init__(self, model_name: str, config: Dict =None, config_path: str = None, **kwargs):
+        """
+        Parameters
+        ----------
+        name : str
+            Name of the metric.
+        config : dict, optional
+            Configuration dict containing parameters, e.g.:
+            {"threshold": 0.6, "bins": 10, ...}
+        config_path : str, optional
+            Path to a configuration file (YAML/JSON) to load parameters from.
+            If both config and config_path are provided, config takes precedence.
+        **kwargs : additional keyword arguments
+            Additional parameters to override config settings for single metric run.
+        """
+        if config is not None:
+            self.config = config
+        else:
+            self.config = load_config(config_path)
+        self.model_name = model_name
+        self.metric_config = self._extract_metric_config(**kwargs)
+        self.result = None
+
+    def _extract_metric_config(self, **kwargs) -> dict:
+        """
+        Extract metric-specific configuration from loaded YAML or from kwargs overrides.
+        """
+        metrics = self.config.get("models", {}).get(self.model_name, {}).get("metrics", [])
+        metrics_cfg = next((m for m in metrics if m["name"].lower() == self.__class__.__name__.lower()), {})
+        return {**metrics_cfg, **kwargs}
+
+    @abstractmethod
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        """
+        Compute the raw metric value.
+
+        Returns
+        -------
+        tuple
+            (value, additional_info)
+        """
+        pass
+
+    def compute(self, y_true, y_pred, **kwargs):
+        """
+        Compute metric and wrap into MetricResult object.
+        """
+        # Merge config kwargs with compute kwargs
+        value = self._compute_raw(y_true, y_pred)
+        threshold = self.metric_config.get("threshold")
+        passed = (threshold is None) or (value >= threshold)
+        self.result = MetricResult(
+            name=self.__class__.__name__,
+            value=value,
+            threshold=threshold,
+            passed=passed,
+            details = {"n_obs": len(y_true)}
+        )
+        return self.result
+
+class MetricResult:
+    """
+    Encapsulates the result of a single metric calculation.
+    Provides standardized output for reporting.
+    """
+
+    def __init__(self, name, value, threshold=None, passed=None, details=Dict[str, Any]):
+        """
+        Parameters
+        ----------
+        name : str
+            Name of the metric.
+        value : float
+            Calculated metric value.
+        threshold : float, optional
+            Threshold value used for pass/fail evaluation.
+        passed : bool, optional
+            Indicates whether metric passed threshold.
+        additional_info : dict, optional
+            Any extra information (e.g., p-value, n_obs, bins).
+        """
+        self.name = name
+        self.value = value
+        self.threshold = threshold
+        self.passed = passed
+        self.details = details or {}
+
+    def summary(self):
+        """
+        Returns a human-readable summary string.
+        """
+        status = "PASSED" if self.passed else "FAILED"
+        threshold_str = f"{self.threshold}" if self.threshold is not None else "N/A"
+        return f"{self.name}: {self.value:.4f} | Threshold: {threshold_str} | {status}"
+
+    def to_dict(self):
+        """
+        Returns standardized dictionary representation of the result.
+        Suitable for reporting to Excel, JSON, or dashboards.
+        """
+        return {
+            "metric": self.name,
+            "value": self.value,
+            "threshold": self.threshold,
+            "passed": self.passed,
+            **self.details
+        }
+
+    def __repr__(self):
+        return f"<MetricResult {self.name}: {self.value:.4f}, passed={self.passed}>"
