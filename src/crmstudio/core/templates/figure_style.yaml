@@ -1,9 +1,47 @@
+fonts:
+  family: "DejaVu Sans"
+  size: 12
+  title_size: 14
+  label_size: 12
+  tick_size: 10
+  legend_size: 10
+
+colors:
+  palette:
+    - "#1f77b4"  # Blue
+    - "#ff7f0e"  # Orange
+    - "#2ca02c"  # Green
+    - "#d62728"  # Red
+    - "#9467bd"  # Purple
+    - "#8c564b"  # Brown
+    - "#e377c2"  # Pink
+    - "#7f7f7f"  # Grey
+  diagonal_line: "#555555"
+  background: "#ffffff"
+  grid: "#e0e0e0"
+  text: "#000000"
+
+figure:
+  dpi: 120
+  figsize: [8, 6]
+  background_color: "#ffffff"
+
+axes:
+  facecolor: "#ffffff"
+  edgecolor: "#000000"
+  grid: true
+  grid_linestyle: "--"
+  grid_linewidth: 0.7
+  grid_alpha: 0.7
+  spine_visibility: true
+  linewidth: 1.0
+
+legend:
+  frameon: false
+  loc: "lower right"
+
 roc_curve:
-  line_color: "blue"
-  line_width: 2
-  line_style: "solid"
   show_diagonal: true
-  diagonal_color: "grey"
-  diagonal_style: "dash"
-  diagonal_width: 1
-    
+  diagonal_linestyle: "--"
+  diagonal_linewidth: 1.2
+  diagonal_alpha: 0.8

@@ -64,7 +64,7 @@ class BaseMetric(ABC):
         """
         Compute metric and wrap into MetricResult object.
         """
-        if self.metric_config.produce_figure:
+        if self.metric_config.get("produce_figure",False):
             figure_data = self._compute_raw(y_true, y_pred)
             return FigureResult(
                 name=helpers.pascal_to_snake(self.__class__.__name__),

@@ -49,6 +49,7 @@ models:
           alpha: 0.05
           score_higher_is_better: true
       - name: roc_curve
+        produce_figure: true
       - name: pietra_index
       - name: ks_stat
         threshold: 0.4
