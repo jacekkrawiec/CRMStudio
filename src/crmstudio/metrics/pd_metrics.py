@@ -1,15 +1,16 @@
 import math
-from ..core.base import BaseMetric, MetricResult
+from ..core.base import BaseMetric, CurveMetric
 import numpy as np
 from scipy import stats
 from sklearn.metrics import roc_auc_score, roc_curve
-from typing import Tuple, Dict, Any
+from typing import Tuple
 
-class AUC(BaseMetric):
+class AUC(CurveMetric):
     """
     AUC (Area Under the ROC Curve) metric.
     
-    This metric calculates the area under the ROC curve, which is a measure of the model's ability to distinguish between classes.
+    This metric calculates the area under the ROC curve, 
+    which is a measure of the model's ability to distinguish between classes.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         """
@@ -22,7 +23,7 @@ class AUC(BaseMetric):
         auc_score = roc_auc_score(y_true, y_pred)
         return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
 
-class AUCDelta(BaseMetric):
+class AUCDelta(CurveMetric):
     """
     Calculate the difference in AUC between two time periods following ECB methodology.
     
@@ -117,9 +118,10 @@ class AUCDelta(BaseMetric):
         auc_curr, s2, nA, nB = self._auc_and_variance(
             y_true=np.asarray(y_true), 
             y_pred=np.asarray(y_pred),
-            higher_better=self.metric_config.get("params", {}).get("score_higher_is_better", True))
-        auc_init = self.metric_config.get("params", {}).get("initial_auc", None)
-        alpha = self.metric_config.get("params", {}).get("alpha", 0.05)
+            higher_better = self._get_param("score_higher_is_better", default=True)
+        )
+        auc_init = self._get_param("initial_auc", default = None)
+        alpha = self._get_param("alpha", default = 0.05)
         
         if auc_init is None:
             raise ValueError("Initial AUC (auc_init) must be provided in metric params.")
@@ -147,7 +149,7 @@ class AUCDelta(BaseMetric):
         return float(p_value), details   
       
 
-class ROCCurve(BaseMetric):
+class ROCCurve(CurveMetric):
     """
     Generate ROC curve coordinates.
     """
@@ -155,7 +157,7 @@ class ROCCurve(BaseMetric):
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
         return {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "thresholds": thresholds.tolist()}
 
-class PietraIndex(BaseMetric):
+class PietraIndex(CurveMetric):
     """
     Calculate Pietra index (maximum deviation of ROC curve from diagonal).
     """
@@ -164,7 +166,7 @@ class PietraIndex(BaseMetric):
         diagonal_dist = np.abs(tpr - fpr) / np.sqrt(2)
         return np.max(diagonal_dist)
 
-class KSStat(BaseMetric):
+class KSStat(CurveMetric):
     """
     Calculate Kolmogorov-Smirnov statistic.
     """
@@ -172,24 +174,8 @@ class KSStat(BaseMetric):
         fpr, tpr, _ = roc_curve(y_true, y_pred)
         ks_stat = np.max(np.abs(tpr - fpr))
         return ks_stat
-
-class CAPCurve(BaseMetric):
-    """
-    Generate Cumulative Accuracy Profile curve coordinates.
-    """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
-        sorted_indices = np.argsort(y_pred)[::-1]
-        y_true_sorted = y_true[sorted_indices]
-        
-        total_pos = np.sum(y_true)
-        cum_pos = np.cumsum(y_true_sorted)
-        
-        x = np.linspace(0, 1, len(y_true))
-        y = cum_pos / total_pos
-        
-        return {"x": x.tolist(), "y": y.tolist()}
-
-class Gini(BaseMetric):
+    
+class Gini(CurveMetric):
     """
     Calculate Gini coefficient (2*AUC - 1).
     """
@@ -198,12 +184,12 @@ class Gini(BaseMetric):
         gini = 2 * auc - 1
         return gini
 
-class GiniCI(BaseMetric):
+class GiniCI(CurveMetric):
     """
     Calculate Gini coefficient with confidence intervals.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        confidence = self.metric_config.get("params", {}).get("confidence", 0.95)
+        confidence = self._get_param("confidence", default = 0.95)
         auc = roc_auc_score(y_true, y_pred)
         gini = 2 * auc - 1
         
@@ -221,6 +207,41 @@ class GiniCI(BaseMetric):
         
         return {"gini": gini, "ci_lower": ci_lower, "ci_upper": ci_upper}
 
+
+class CAPCurve(CurveMetric):
+    """
+    Generate Cumulative Accuracy Profile curve coordinates.
+    
+    In credit risk context, predictions (y_pred) often represent rating scores
+    where multiple observations share the same score. This implementation:
+    1. First sorts by predictions (ratings) in descending order
+    2. Within each rating group, sorts by actual defaults (y_true)
+    This ensures maximum discriminatory power within rating groups.
+    """
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        # Convert inputs to numpy arrays
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
+        
+        # Create lexicographic sort key: first by pred (descending), then by true (descending)
+        # This ensures that within each pred value, defaulters come first
+        sorted_indices = np.lexsort((-y_true, -y_pred))
+        
+        y_true_sorted = y_true[sorted_indices]
+        total_pos = np.sum(y_true)
+        cum_pos = np.cumsum(y_true_sorted)
+        
+        # Generate x-coordinates (percentage of population); adding 1 element to the list to accomodate (0,0) point
+        x = np.linspace(0, 1, len(y_true)+1)
+        # Generate y-coordinates (percentage of captured defaults); inserting 0 at the beginning to accomodate (0,0) point
+        y = np.insert(cum_pos / total_pos, 0, 0)
+    
+        return {
+            "x": x.tolist(), 
+            "y": y.tolist()
+        }
+
+
 class CIER(BaseMetric):
     """
     Calculate Conditional Information Entropy Ratio (CIER).
@@ -231,7 +252,7 @@ class CIER(BaseMetric):
     where H(Y|X) is conditional entropy and H(Y) is entropy of target variable.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        n_bins = self.metric_config.get("params", {}).get("n_bins", 10)
+        n_bins = self._get_param("n_bins", default = 10)
         # Calculate entropy of target variable H(Y)
         p_y1 = np.mean(y_true)
         p_y0 = 1 - p_y1
@@ -265,7 +286,7 @@ class KLDistance(BaseMetric):
     Calculate Kullback-Leibler divergence between predicted and actual distributions.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        n_bins = self.metric_config.get("params", {}).get("n_bins", 10)
+        n_bins = self._get_param("n_bins", default = 10)
         hist_true, _ = np.histogram(y_true, bins=n_bins, density=True)
         hist_pred, _ = np.histogram(y_pred, bins=n_bins, density=True)
         
@@ -282,7 +303,7 @@ class InformationValue(BaseMetric):
     Calculate Information Value (IV) for the model predictions.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        n_bins = self.metric_config.get("params", {}).get("n_bins", 10)
+        n_bins = self._get_param("n_bins", default = 10)
         # Create bins based on predictions
         bins_pred = np.linspace(0, 1, n_bins + 1)
         bins_indices = np.digitize(y_pred, bins_pred)
@@ -313,15 +334,6 @@ class KendallsTau(BaseMetric):
     def _compute_raw(self, y_true, y_pred, **kwargs):
         tau, _ = stats.kendalltau(y_true, y_pred)
         return tau
-
-class AccuracyRatio(BaseMetric):
-    """
-    Calculate Accuracy Ratio (equivalent to Gini coefficient).
-    """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
-        auc = roc_auc_score(y_true, y_pred)
-        ar = 2 * auc - 1
-        return ar
 
 class SpearmansRho(BaseMetric):
     """

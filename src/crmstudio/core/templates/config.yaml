@@ -54,6 +54,7 @@ models:
       - name: ks_stat
         threshold: 0.4
       - name: cap_curve
+        produce_figure: true
       - name: gini
         threshold: 0.4
       - name: gini_ci
