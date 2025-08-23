@@ -19,28 +19,14 @@ y_pred = list(chain.from_iterable(y_pred))
 y_true = [1*(i%10 <= i/10) for i in range(len(y_pred))]
 
 
-cap = metrics.pd_metrics.CAPCurve("pd_model")
-cap_res = cap.compute(y_true, y_pred)
-fig_data = cap_res.figure_data
-fig_results = cap._plot_curve(fig_data, style)
-
 roc = metrics.pd_metrics.ROCCurve("pd_model")
-roc_res = roc.compute(y_true, y_pred)
+roc_res = roc.compute(y_true = y_true, y_pred = y_pred)
+
 fig_data = roc_res.figure_data
-fig_results = roc._plot_curve(fig_data, style)
 
-cap.show_plot(fig_data, style)
+roc.show_plot(fig_data, style)
 
-
-# Method 1: Using matplotlib
-import base64
-from io import BytesIO
-import matplotlib.pyplot as plt
-
-
-pietra = metrics.pd_metrics.PietraIndex("pd_model")
-pietra_res = pietra.compute(y_true, y_pred)
-
-
-
+ks = metrics.pd_metrics.KSStat("pd_model")
+ks_res = ks.compute(fr = fig_data)
+ks_res = ks.compute(y_true = y_true, y_pred = y_pred)
 

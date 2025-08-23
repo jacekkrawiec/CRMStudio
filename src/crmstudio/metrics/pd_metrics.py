@@ -1,9 +1,9 @@
 import math
-from ..core.base import BaseMetric, CurveMetric
+from ..core.base import BaseMetric, CurveMetric, FigureResult
 import numpy as np
 from scipy import stats
 from sklearn.metrics import roc_auc_score, roc_curve
-from typing import Tuple
+from typing import Tuple, Union
 
 class AUC(CurveMetric):
     """
@@ -12,7 +12,7 @@ class AUC(CurveMetric):
     This metric calculates the area under the ROC curve, 
     which is a measure of the model's ability to distinguish between classes.
     """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
+    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
         """
         Calculate the AUC score.
         
@@ -20,8 +20,17 @@ class AUC(CurveMetric):
         :param y_pred: Target scores, can either be probability estimates of the positive class, confidence values, or binary decisions.
         :return: AUC score as a MetricResult object.
         """
-        auc_score = roc_auc_score(y_true, y_pred)
-        return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
+        if fr is not None:
+            fpr = np.array(fr['x'])
+            tpr = np.array(fr['y'])
+            # Calculate AUC using trapezoidal rule 
+            auc_score = np.trapz(tpr, fpr)
+            return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
+        elif y_true is not None and y_pred is not None:
+            auc_score = roc_auc_score(y_true, y_pred)
+            return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
+        else:
+            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
 
 class AUCDelta(CurveMetric):
     """
@@ -114,7 +123,7 @@ class AUCDelta(CurveMetric):
         
         return auc, var_auc, nA, nB
 
-    def _compute_raw(self, y_true, y_pred, y_true_prev=None, y_pred_prev=None, **kwargs):
+    def _compute_raw(self, y_true, y_pred, **kwargs):
         auc_curr, s2, nA, nB = self._auc_and_variance(
             y_true=np.asarray(y_true), 
             y_pred=np.asarray(y_pred),
@@ -153,7 +162,7 @@ class ROCCurve(CurveMetric):
     """
     Generate ROC curve coordinates.
     """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
+    def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
         return {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "thresholds": thresholds.tolist()}
 
@@ -161,8 +170,14 @@ class PietraIndex(CurveMetric):
     """
     Calculate Pietra index (maximum deviation of ROC curve from diagonal).
     """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
-        fpr, tpr, _ = roc_curve(y_true, y_pred)
+    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
+        if fr is not None:
+            fpr = np.asarray(fr['x'])
+            tpr = np.asarray(fr['y'])
+        elif y_pred is not None and y_true is not None:
+            fpr, tpr, _ = roc_curve(y_true, y_pred)
+        else:
+            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
         diagonal_dist = np.abs(tpr - fpr) / np.sqrt(2)
         return np.max(diagonal_dist)
 
@@ -170,8 +185,14 @@ class KSStat(CurveMetric):
     """
     Calculate Kolmogorov-Smirnov statistic.
     """
-    def _compute_raw(self, y_true, y_pred, **kwargs):
-        fpr, tpr, _ = roc_curve(y_true, y_pred)
+    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
+        if fr is not None:
+            fpr = np.asarray(fr['x'])
+            tpr = np.asarray(fr['y'])
+        elif y_pred is not None and y_true is not None:
+            fpr, tpr, _ = roc_curve(y_true, y_pred)
+        else:
+            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
         ks_stat = np.max(np.abs(tpr - fpr))
         return ks_stat
     
@@ -240,7 +261,6 @@ class CAPCurve(CurveMetric):
             "x": x.tolist(), 
             "y": y.tolist()
         }
-
 
 class CIER(BaseMetric):
     """

@@ -84,7 +84,7 @@ class BaseMetric(ABC):
         """
         pass
 
-    def compute(self, y_true, y_pred, **kwargs):
+    def compute(self, **kwargs):
         """
         Compute metric and wrap into MetricResult/FigureResult object.
         
@@ -93,22 +93,30 @@ class BaseMetric(ABC):
         steps = ["Validating inputs", "Computing metric", "Wrapping results"]
         with tqdm(total = len(steps), desc = f"Computing {self.__class__.__name__}") as pbar:
             #validate inputs
-            y_true, y_pred = self._validate_inputs(y_true, y_pred)
-            pbar.update(1)
+            if 'y_true' in kwargs and 'y_pred' in kwargs:
+                y_true = kwargs.get('y_true')
+                y_pred = kwargs.get('y_pred')
+                y_true, y_pred = self._validate_inputs(y_true, y_pred)
+            
+                pbar.update(1)
 
-            #compute metric
-            value, details = self._wrap_results(self._compute_raw(y_true, y_pred))
-            pbar.update(1)
-
+                #compute metric
+                wrapped_result = self._wrap_results(self._compute_raw(y_true = y_true, y_pred = y_pred)) #note it's always a dictionary
+                pbar.update(1)
+            elif 'fr' in kwargs and kwargs.get('fr') is not None:
+                wrapped_result = self._wrap_results(self._compute_raw(fr = kwargs.get('fr')))
+                pbar.update(2)
             #wrap results
             if self.metric_config.get("produce_figure",False):
-                figure_data = details
+                figure_data = wrapped_result['details']
                 self.result = FigureResult(
                     name=helpers.pascal_to_snake(self.__class__.__name__),
                     figure_data = figure_data
                 )
             else:
                 threshold = self.metric_config.get("threshold")
+                value = wrapped_result['value']
+                details = wrapped_result['details']
                 passed = (threshold is None) or (value >= threshold)
                 
                 self.result = MetricResult(
@@ -129,15 +137,14 @@ class BaseMetric(ABC):
         if isinstance(value, (int, float)):
             value, details = value, {}
         elif isinstance(value, dict):
-            value, details = np.nan, value
+            details = value
+            value = np.nan
         elif isinstance(value, (tuple, list)):
             value, *rest = value
             details = rest[0] if rest else {}
         else:
             raise ValueError("Unsupported return type from _compute_raw")
         return {"value": value, "details": details}
-
-
 
 @dataclass
 class MetricResult:
@@ -153,7 +160,7 @@ class MetricResult:
         """
         status = "PASSED" if self.passed else "FAILED"
         threshold_str = f"{self.threshold}" if self.threshold is not None else "N/A"
-        return f"{self.name}: {self.value:.4f} | Threshold: {threshold_str} | {status}"
+        return f"{self.name}: {self.value:.6f} | Threshold: {threshold_str} | {status}"
 
     def to_dict(self):
         """
@@ -211,7 +218,7 @@ class FigureResult:
             Dictionary with standardized 'x' and 'y' keys, preserving original data
         """
         # Copy original data
-        standardized = data.copy()
+        standardized = data
         
         # Known coordinate mappings
         coord_mappings = {
@@ -273,24 +280,6 @@ class CurveMetric(BaseMetric):
 
     def _compute_raw(self, y_true, y_pred, **kwargs):
         return super()._compute_raw(y_true, y_pred, **kwargs)
-
-    def _compute_auc(self, x, y) -> float:
-        """
-        Compute Area Under Curve (AUC) using trapezoidal rule.
-        This method assumes x and y represent the curve coordinates.
-        TODO: sort x and y if not sorted
-        """
-        return np.trapz(y, x)
-    
-    def _compute_ks(self, x, y) -> Tuple[float, float]:
-        """
-        Compute Kolmogorov-Smirnov (KS) statistic.
-        Returns KS value and corresponding x (threshold).
-        """
-        ks_statistic = np.max(np.abs(y - x))
-        ks_index = np.argmax(np.abs(y - x))
-        ks_threshold = x[ks_index]
-        return ks_statistic, ks_threshold
     
     def _plot_curve(self, figure_data: Dict, style: Optional[Dict] = None) -> Dict:
         """
@@ -315,16 +304,15 @@ class CurveMetric(BaseMetric):
         """
         if style is None:
             style = self._style
+        else:
+            self._style = style
 
         palette = style["colors"]["palette"]
         x = figure_data['x']
         y = figure_data['y']
         
-        # Calculate score (AUC) if not provided
-        score = figure_data.get('score', self._compute_auc(x, y))
-        
         fig, ax = plt.subplots()
-        ax.plot(x, y, color=palette[0], lw=2, label=f"Curve (AUC = {score:.2f})")
+        ax.plot(x, y, color=palette[0], lw=2)
         
         if style.get("show_diagonal", True):
             ax.plot([0, 1], [0, 1], color='grey', lw=1, linestyle='--', label='Random')
