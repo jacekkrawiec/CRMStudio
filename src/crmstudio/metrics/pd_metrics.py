@@ -1,5 +1,5 @@
 import math
-from ..core.base import BaseMetric, CurveMetric, FigureResult
+from ..core.base import BaseMetric, CurveMetric, DistributionAssociationMetric, FigureResult
 import numpy as np
 from scipy import stats
 from sklearn.metrics import roc_auc_score, roc_curve
@@ -262,7 +262,7 @@ class CAPCurve(CurveMetric):
             "y": y.tolist()
         }
 
-class CIER(BaseMetric):
+class CIER(DistributionAssociationMetric):
     """
     Calculate Conditional Information Entropy Ratio (CIER).
     
@@ -301,7 +301,7 @@ class CIER(BaseMetric):
         cier = 1 - h_y_x / (h_y + 1e-10)
         return cier
 
-class KLDistance(BaseMetric):
+class KLDistance(DistributionAssociationMetric):
     """
     Calculate Kullback-Leibler divergence between predicted and actual distributions.
     """
@@ -318,18 +318,36 @@ class KLDistance(BaseMetric):
         kl_div = np.sum(hist_true * np.log(hist_true / hist_pred))
         return kl_div
 
-class InformationValue(BaseMetric):
+class InformationValue(DistributionAssociationMetric):
     """
     Calculate Information Value (IV) for the model predictions.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         n_bins = self._get_param("n_bins", default = 10)
-        # Create bins based on predictions
-        bins_pred = np.linspace(0, 1, n_bins + 1)
-        bins_indices = np.digitize(y_pred, bins_pred)
+        
+        # Convert predictions to numpy array
+        y_pred = np.asarray(y_pred)
+        
+        # Determine if input is already binned (discrete)
+        unique_values = np.unique(y_pred)
+        threshold = max(0.1 * len(y_true), 20)  # 10% of length or 20, whichever is larger
+        is_discrete = len(unique_values) <= threshold
+        
+        if is_discrete:
+            # For discrete ratings, use unique values as bins
+            unique_ratings = np.unique(y_pred)
+            bins_indices = np.zeros_like(y_pred, dtype=int)
+            for i, rating in enumerate(unique_ratings, 1):
+                bins_indices[y_pred == rating] = i
+        else:
+            # For continuous predictions, create bins between 0 and 1
+            bins_pred = np.linspace(0, 1, n_bins + 1)
+            bins_indices = np.digitize(y_pred, bins_pred)
         
         iv_total = 0
-        for i in range(1, n_bins + 1):
+        n_bins_actual = len(np.unique(bins_indices))
+        
+        for i in range(1, n_bins_actual + 1):
             mask = bins_indices == i
             if np.any(mask):
                 good = np.sum(y_true[mask] == 0)
@@ -347,7 +365,7 @@ class InformationValue(BaseMetric):
                 
         return iv_total
 
-class KendallsTau(BaseMetric):
+class KendallsTau(DistributionAssociationMetric):
     """
     Calculate Kendall's Tau correlation coefficient.
     """
@@ -355,10 +373,52 @@ class KendallsTau(BaseMetric):
         tau, _ = stats.kendalltau(y_true, y_pred)
         return tau
 
-class SpearmansRho(BaseMetric):
+class SpearmansRho(DistributionAssociationMetric):
     """
     Calculate Spearman's rank correlation coefficient.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         rho, _ = stats.spearmanr(y_true, y_pred)
         return rho
+
+class KSDistPlot(DistributionAssociationMetric):
+    """
+    Calculates cumulatve distribution function of defaulted and non-defaulted populations.
+    Shows maximum separation point, i.e. KS statistic.
+    """
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        return None #some data to be implemented
+
+class ScoreHistogram(DistributionAssociationMetric):
+    """
+    Calculates 2 histograms of scores, one per each value of y_true,
+    i.e. histogram of scores for defaulted and non-defaulted population.
+    """
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        n_bins = self._get_param("n_bins", default=10)
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        # Defaulted (y_true == 1)
+        scores_def = y_pred[y_true == 1]
+        # Non-defaulted (y_true == 0)
+        scores_nondef = y_pred[y_true == 0]
+
+        # Use same bin edges for both histograms
+        bin_edges = np.linspace(np.min(y_pred), np.max(y_pred), n_bins + 1)
+
+        hist_def, _ = np.histogram(scores_def, bins=bin_edges)
+        hist_nondef, _ = np.histogram(scores_nondef, bins=bin_edges)
+
+        return {
+            "bin_edges": bin_edges.tolist(),
+            "hist_defaulted": hist_def.tolist(),
+            "hist_non_defaulted": hist_nondef.tolist()
+        }
+
+class QuantileBadPlot(DistributionAssociationMetric):
+    """
+    Calculates Bad rate per quntile or rating if y_pred is already discrete
+    """    
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        return None #some data to be implemented

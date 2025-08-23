@@ -72,6 +72,12 @@ models:
       - name: kendalls_tau
       - name: accuracy_ratio
       - name: spearmans_rho
+      - name: ks_dist_plot
+        produce_figure: true
+      - name: score_histogram
+        produce_figure: true
+      - name: quantile_bad_plot
+        produce_figure: true
       
       # Stability metrics
       - name: migration_matrix

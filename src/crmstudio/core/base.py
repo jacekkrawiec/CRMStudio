@@ -4,6 +4,8 @@ from typing import Any, Dict, Tuple, Optional, Union
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
+from io import BytesIO
+import base64
 
 from .config_loader import load_config
 from ..utils import helpers
@@ -321,8 +323,6 @@ class CurveMetric(BaseMetric):
         ax.grid(True)
         
         # Convert matplotlib figure to a dictionary representation
-        from io import BytesIO
-        import base64
         buf = BytesIO()
         fig.savefig(buf, format='png', bbox_inches='tight')
         buf.seek(0)
@@ -338,8 +338,6 @@ class CurveMetric(BaseMetric):
     def show_plot(self, figure_data: Dict, style: Optional[Dict]=  None):
         """ shows plot """
         image_base64 = self._plot_curve(figure_data, style)['image_base64']
-        from io import BytesIO
-        import base64
         img_data = base64.b64decode(image_base64)
         img = plt.imread(BytesIO(img_data))
         plt.imshow(img)
@@ -357,7 +355,72 @@ class CurveMetric(BaseMetric):
         filepath : str
             Path where to save the plot
         """
-        import base64
+        img_data = base64.b64decode(figure_data["image_base64"])
+        with open(filepath, "wb") as f:
+            f.write(img_data)
+
+
+class DistributionAssociationMetric(BaseMetric):
+    """
+    Base class for metrics based on distributions/associations (e.g. histograms, spearman correlation, kendall's tau, psi, etc.).
+    """
+    def __init__(self, model_name: str, config: Dict = None, config_path: str = None, **kwargs):
+        super().__init__(model_name, config, config_path, **kwargs)
+        # Move plt.rcParams update to initialization
+        self._style = self._init_style()
+
+    def _init_style(self):
+        """
+        Initialize style configuration for plotting. 
+        Can be overwritten by user-procided styles.
+        By default, uses template from config_loader
+        """
+        default_style_path = "src/crmstudio/core/templates/figure_style.yaml"
+        style = load_config(default_style_path)
+        return style
+
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        """
+        Compute the raw metric value for distribution/association metrics.
+
+        Returns
+        -------
+        tuple
+            (value, additional_info)
+        """
+        pass
+
+    def _calculate_distribution(self, figure_data: Dict, style: Optional[Dict] = None) -> Dict:
+        """
+        Plot or calculate the distribution/association visualization.
+
+        Returns
+        -------
+        Dict
+            Dictionary containing base64 encoded image and dimensions
+        """
+        bin_edges = figure_data['bin_edges']
+        hist_def = figure_data['hist_defaulted']
+        hist_nondef = figure_data['hist_non_defaulted']
+        fig, ax = plt.subplots(figsize=(8,5))
+        ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_nondef, alpha = 0.5, color = 'green', label='non-defaulted')
+        ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_def, alpha = 0.5, color = 'red', label='defaulted')
+        ax.set_xlabel("Score")
+        ax.set_ylabel("Count")
+        ax.legend()
+        return ax
+
+    def show_plot(self, figure_data: Dict, style: Optional[Dict]=None):
+        """
+        Display the plot for the distribution/association metric.
+        """
+        ax = self._calculate_distribution(figure_data, style)
+        plt.show()
+
+    def save_plot(self, figure_data: Dict, filepath: str):
+        """
+        Save the plot to disk if needed.
+        """
         img_data = base64.b64decode(figure_data["image_base64"])
         with open(filepath, "wb") as f:
             f.write(img_data)
