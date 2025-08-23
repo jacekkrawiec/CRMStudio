@@ -2,6 +2,7 @@
 
 CRMStudio is a Python package designed for monitoring IRB models (PD, LGD, EAD) locally within your bank infrastructure. It helps you run monitoring checks, evaluate metrics, trigger alerts, and generate reports — all **without sharing sensitive data externally**.
 
+Attention: CRMStudio is in alpha stage, not everything is implemented yet. It is not yet available via pip, etc. For now it can be used for PD's discriminaotry power assessment. More features will be available soon.
 ---
 
 ## Quickstart
