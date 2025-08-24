@@ -383,11 +383,40 @@ class SpearmansRho(DistributionAssociationMetric):
 
 class KSDistPlot(DistributionAssociationMetric):
     """
-    Calculates cumulatve distribution function of defaulted and non-defaulted populations.
+    Calculates cumulative distribution function of defaulted and non-defaulted populations.
     Shows maximum separation point, i.e. KS statistic.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        return None #some data to be implemented
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        # Separate scores for defaulted and non-defaulted
+        scores_def = y_pred[y_true == 1]
+        scores_nondef = y_pred[y_true == 0]
+
+        # Combine all scores for common binning
+        all_scores = np.concatenate([scores_def, scores_nondef])
+        # Use unique sorted scores as thresholds for stepwise CDF
+        thresholds = np.unique(all_scores)
+        # Add min/max for completeness
+        thresholds = np.concatenate(([np.min(all_scores)], thresholds, [np.max(all_scores)]))
+
+        # Compute empirical CDFs
+        cdf_def = np.searchsorted(np.sort(scores_def), thresholds, side='right') / max(len(scores_def), 1)
+        cdf_nondef = np.searchsorted(np.sort(scores_nondef), thresholds, side='right') / max(len(scores_nondef), 1)
+
+        # KS statistic and location
+        ks_stat = np.max(np.abs(cdf_def - cdf_nondef))
+        ks_idx = np.argmax(np.abs(cdf_def - cdf_nondef))
+        ks_threshold = thresholds[ks_idx]
+
+        return {
+            "thresholds": thresholds.tolist(),
+            "cdf_defaulted": cdf_def.tolist(),
+            "cdf_non_defaulted": cdf_nondef.tolist(),
+            "ks_stat": float(ks_stat),
+            "ks_threshold": float(ks_threshold)
+        }
 
 class ScoreHistogram(DistributionAssociationMetric):
     """
@@ -418,7 +447,92 @@ class ScoreHistogram(DistributionAssociationMetric):
 
 class QuantileBadPlot(DistributionAssociationMetric):
     """
-    Calculates Bad rate per quntile or rating if y_pred is already discrete
-    """    
+    !!!!TODO: !This plots box plot for binary variable which makes no sense at all, think of a different approach.
+
+    Calculates bad rate and boxplot statistics per quantile or per rating if y_pred is already discrete.
+
+    For continuous predictions, splits y_pred into quantiles (e.g., deciles) and computes
+    the default rate (bad rate) and boxplot statistics in each quantile. For discrete predictions (e.g., ratings),
+    computes the bad rate and boxplot statistics for each unique rating.
+
+    Returns:
+        dict with keys:
+            - "bin_edges": edges of bins (quantiles or unique ratings)
+            - "bad_rate": bad rate per bin
+            - "count": number of samples per bin
+            - "bin_labels": labels for bins (quantile range or rating value)
+            - "boxplot_stats": list of dicts per bin with keys:
+                - "mean", "min", "max", "q1", "median", "q3"
+    """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        return None #some data to be implemented
+        n_bins = self._get_param("n_bins", default=10)
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        unique_values = np.unique(y_pred)
+        threshold = max(0.1 * len(y_true), 20)
+        is_discrete = len(unique_values) <= threshold
+
+        bad_rate = []
+        count = []
+        boxplot_stats = []
+        if is_discrete:
+            bin_labels = np.sort(unique_values)
+            bin_edges = bin_labels.tolist()
+            for val in bin_labels:
+                mask = y_pred == val
+                y_true_bin = y_true[mask]
+                count.append(np.sum(mask))
+                if np.sum(mask) > 0:
+                    bad_rate.append(np.mean(y_true_bin))
+                    stats_bin = {
+                        "mean": float(np.mean(y_true_bin)),
+                        "min": float(np.min(y_true_bin)),
+                        "max": float(np.max(y_true_bin)),
+                        "q1": float(np.percentile(y_true_bin, 25)),
+                        "median": float(np.median(y_true_bin)),
+                        "q3": float(np.percentile(y_true_bin, 75))
+                    }
+                else:
+                    bad_rate.append(np.nan)
+                    stats_bin = {
+                        "mean": np.nan, "min": np.nan, "max": np.nan,
+                        "q1": np.nan, "median": np.nan, "q3": np.nan
+                    }
+                boxplot_stats.append(stats_bin)
+        else:
+            quantiles = np.linspace(0, 1, n_bins + 1)
+            bin_edges = np.quantile(y_pred, quantiles)
+            bin_edges = np.unique(bin_edges)
+            bins_indices = np.digitize(y_pred, bin_edges, right=True)
+            bin_labels = []
+            for i in range(1, len(bin_edges)):
+                mask = bins_indices == i
+                y_true_bin = y_true[mask]
+                count.append(np.sum(mask))
+                if np.sum(mask) > 0:
+                    bad_rate.append(np.mean(y_true_bin))
+                    stats_bin = {
+                        "mean": float(np.mean(y_true_bin)),
+                        "min": float(np.min(y_true_bin)),
+                        "max": float(np.max(y_true_bin)),
+                        "q1": float(np.percentile(y_true_bin, 25)),
+                        "median": float(np.median(y_true_bin)),
+                        "q3": float(np.percentile(y_true_bin, 75))
+                    }
+                else:
+                    bad_rate.append(np.nan)
+                    stats_bin = {
+                        "mean": np.nan, "min": np.nan, "max": np.nan,
+                        "q1": np.nan, "median": np.nan, "q3": np.nan
+                    }
+                boxplot_stats.append(stats_bin)
+                bin_labels.append(f"{bin_edges[i-1]:.3f} - {bin_edges[i]:.3f}")
+
+        return {
+            "bin_edges": bin_edges.tolist(),
+            "bad_rate": bad_rate,
+            "count": count,
+            "bin_labels": bin_labels if not is_discrete else bin_edges,
+            "boxplot_stats": boxplot_stats
+        }

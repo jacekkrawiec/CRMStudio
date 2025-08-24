@@ -394,20 +394,88 @@ class DistributionAssociationMetric(BaseMetric):
         """
         Plot or calculate the distribution/association visualization.
 
+        So, this method is used for plotting, it receives figure data with standardized x and y; where x is score freq and y is obs freq
+
+        However, this will differ based on the source method, i.e. 
+        KS will return 2 series, with cumulative freq of bads and goods; x axis scaled from 0 to 1
+        HIST will also return 2 series, with frequencies of goods and bads, but for binned x
+        Quantile bad plot shows the same thing as KS plot IMO
+
         Returns
         -------
         Dict
             Dictionary containing base64 encoded image and dimensions
         """
-        bin_edges = figure_data['bin_edges']
-        hist_def = figure_data['hist_defaulted']
-        hist_nondef = figure_data['hist_non_defaulted']
         fig, ax = plt.subplots(figsize=(8,5))
-        ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_nondef, alpha = 0.5, color = 'green', label='non-defaulted')
-        ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_def, alpha = 0.5, color = 'red', label='defaulted')
-        ax.set_xlabel("Score")
-        ax.set_ylabel("Count")
-        ax.legend()
+        if self.__class__.__name__ == "ScoreHistogram":
+            bin_edges = figure_data['bin_edges']
+            hist_def = figure_data['hist_defaulted']
+            hist_nondef = figure_data['hist_non_defaulted']
+            ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_nondef, alpha = 0.5, color = 'green', label='non-defaulted')
+            ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_def, alpha = 0.5, color = 'red', label='defaulted')
+            ax.set_xlabel("Score")
+            ax.set_ylabel("Count")
+            ax.legend()
+            ax.set_title("PD Model Scores Histogram")
+        elif self.__class__.__name__ == "KSDistPlot":
+            x = figure_data['thresholds']
+            cdf_good = np.asarray(figure_data['cdf_non_defaulted'])
+            cdf_bad = np.asarray(figure_data['cdf_defaulted'])
+            ax.plot(x, cdf_good, color='green', label='Non-defaulted CDF')
+            ax.plot(x, cdf_bad, color='red', label='Defaulted CDF')
+            ax.set_xlabel("Score")
+            ax.set_ylabel("Cumulative Proportion")
+            ax.legend()
+            ax.set_title("KS Distribution Plot")
+            # Optionally, highlight KS statistic
+            if 'ks_stat' in figure_data and 'ks_threshold' in figure_data:
+                ks_stat = figure_data['ks_stat']
+                ks_x = figure_data['ks_threshold']
+                ax.vlines(ks_x, cdf_good[np.argmax(np.abs(cdf_good - cdf_bad))], cdf_bad[np.argmax(np.abs(cdf_good - cdf_bad))],
+                    color='blue', linestyle='--', label=f'KS={ks_stat:.3f}')
+                ax.legend()
+        elif self.__class__.__name__ == "QuantileBadPlot":
+            bin_labels = figure_data['bin_labels']
+            bad_rate = figure_data['bad_rate']
+            count = figure_data['count']
+            boxplot_data = figure_data['boxplot_data']  # Should be a list of lists/arrays, one per bin
+
+            # Plot bad rate as bar plot
+            ax.bar(bin_labels, bad_rate, color='red', alpha=0.6, label='Bad Rate')
+            ax.set_xlabel("Score Bin")
+            ax.set_ylabel("Bad Rate", color='red')
+            ax.tick_params(axis='y', labelcolor='red')
+
+            # Plot count as line plot on secondary y-axis
+            ax2 = ax.twinx()
+            ax2.plot(bin_labels, count, color='blue', marker='o', label='Count')
+            ax2.set_ylabel("Count", color='blue')
+            ax2.tick_params(axis='y', labelcolor='blue')
+
+            # Add boxplots for each bin
+            # Position boxplots at bin centers
+            positions = np.arange(len(bin_labels))
+            box = ax.boxplot(
+                boxplot_data,
+                positions=positions,
+                widths=0.5,
+                patch_artist=True,
+                boxprops=dict(facecolor='gray', alpha=0.3),
+                medianprops=dict(color='black'),
+                showfliers=False
+            )
+
+            # Adjust x-ticks to match bin labels
+            ax.set_xticks(positions)
+            ax.set_xticklabels(bin_labels)
+
+            ax.set_title("Bad Rate by Score Quantile (with Boxplots)")
+            # Combine legends from both axes
+            lines, labels = ax.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax2.legend(lines + lines2, labels + labels2, loc='upper right')
+        else:
+            raise NotImplementedError(f"Distribution plotting for {self.__class__.__name__} is not available.")
         return ax
 
     def show_plot(self, figure_data: Dict, style: Optional[Dict]=None):
