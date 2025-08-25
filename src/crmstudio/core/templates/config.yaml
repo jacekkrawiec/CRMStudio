@@ -76,9 +76,11 @@ models:
         produce_figure: true
       - name: score_histogram
         produce_figure: true
-      - name: quantile_bad_plot
+      - name: pd_lift_plot
         produce_figure: true
-      
+      - name: pd_gain_plot
+        produce_figure: true
+
       # Stability metrics
       - name: migration_matrix
       - name: migration_stability

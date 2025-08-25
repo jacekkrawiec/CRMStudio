@@ -160,11 +160,21 @@ class AUCDelta(CurveMetric):
 
 class ROCCurve(CurveMetric):
     """
-    Generate ROC curve coordinates.
+    Generate ROC curve coordinates with AUC statistic.
     """
     def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
-        return {"fpr": fpr.tolist(), "tpr": tpr.tolist(), "thresholds": thresholds.tolist()}
+        auc_score = roc_auc_score(y_true, y_pred)
+        
+        return {
+            "x": fpr.tolist(),  # Standardized coordinate naming
+            "y": tpr.tolist(),  # Standardized coordinate naming
+            "thresholds": thresholds.tolist(),
+            "auc": float(auc_score),
+            "title": f"ROC Curve (AUC = {auc_score:.3f})",
+            "xlabel": "False Positive Rate",
+            "ylabel": "True Positive Rate"
+        }
 
 class PietraIndex(CurveMetric):
     """
@@ -252,14 +262,25 @@ class CAPCurve(CurveMetric):
         total_pos = np.sum(y_true)
         cum_pos = np.cumsum(y_true_sorted)
         
-        # Generate x-coordinates (percentage of population); adding 1 element to the list to accomodate (0,0) point
+        # Generate x-coordinates (percentage of population)
         x = np.linspace(0, 1, len(y_true)+1)
-        # Generate y-coordinates (percentage of captured defaults); inserting 0 at the beginning to accomodate (0,0) point
+        # Generate y-coordinates (percentage of captured defaults)
         y = np.insert(cum_pos / total_pos, 0, 0)
+        
+        # Calculate AR (Accuracy Ratio) which is equivalent to Gini coefficient
+        # AR = 2*AUC - 1
+        auc = roc_auc_score(y_true, y_pred)
+        ar = 2 * auc - 1
     
         return {
             "x": x.tolist(), 
-            "y": y.tolist()
+            "y": y.tolist(),
+            "ar": float(ar),
+            "title": f"CAP Curve (AR = {ar:.3f})",
+            "xlabel": "Fraction of Population",
+            "ylabel": "Fraction of Defaults Captured",
+            "n_defaults": int(total_pos),
+            "n_total": len(y_true)
         }
 
 class CIER(DistributionAssociationMetric):
@@ -439,100 +460,120 @@ class ScoreHistogram(DistributionAssociationMetric):
         hist_def, _ = np.histogram(scores_def, bins=bin_edges)
         hist_nondef, _ = np.histogram(scores_nondef, bins=bin_edges)
 
+        default_rate = len(scores_def) / len(y_pred) * 100
+        
         return {
             "bin_edges": bin_edges.tolist(),
             "hist_defaulted": hist_def.tolist(),
-            "hist_non_defaulted": hist_nondef.tolist()
+            "hist_non_defaulted": hist_nondef.tolist(),
+            "title": f"Score Distribution (Default Rate: {default_rate:.1f}%)",
+            "xlabel": "Score",
+            "ylabel": "Count",
+            "n_defaults": len(scores_def),
+            "n_non_defaults": len(scores_nondef)
         }
 
-class QuantileBadPlot(DistributionAssociationMetric):
+class PDLiftPlot(DistributionAssociationMetric):
     """
-    !!!!TODO: !This plots box plot for binary variable which makes no sense at all, think of a different approach.
+    Implements Lift Plotting.
 
-    Calculates bad rate and boxplot statistics per quantile or per rating if y_pred is already discrete.
-
-    For continuous predictions, splits y_pred into quantiles (e.g., deciles) and computes
-    the default rate (bad rate) and boxplot statistics in each quantile. For discrete predictions (e.g., ratings),
-    computes the bad rate and boxplot statistics for each unique rating.
-
-    Returns:
-        dict with keys:
-            - "bin_edges": edges of bins (quantiles or unique ratings)
-            - "bad_rate": bad rate per bin
-            - "count": number of samples per bin
-            - "bin_labels": labels for bins (quantile range or rating value)
-            - "boxplot_stats": list of dicts per bin with keys:
-                - "mean", "min", "max", "q1", "median", "q3"
+    Shows the lift curve: for each quantile (e.g., decile) of the sorted population (by predicted score),
+    computes the ratio of the observed default rate in that quantile to the overall default rate.
+    The random model is a horizontal line at lift=1.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
-        n_bins = self._get_param("n_bins", default=10)
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
 
-        unique_values = np.unique(y_pred)
-        threshold = max(0.1 * len(y_true), 20)
-        is_discrete = len(unique_values) <= threshold
+        # Sort by predicted score descending (worst to best)
+        sorted_idx = np.argsort(-y_pred)
+        y_true_sorted = y_true[sorted_idx]
+        
+        # Create percentile points (1 to 100%)
+        percentiles = np.linspace(1, 100, 100)  # 100 points for 1% to 100% inclusive
 
-        bad_rate = []
-        count = []
-        boxplot_stats = []
-        if is_discrete:
-            bin_labels = np.sort(unique_values)
-            bin_edges = bin_labels.tolist()
-            for val in bin_labels:
-                mask = y_pred == val
-                y_true_bin = y_true[mask]
-                count.append(np.sum(mask))
-                if np.sum(mask) > 0:
-                    bad_rate.append(np.mean(y_true_bin))
-                    stats_bin = {
-                        "mean": float(np.mean(y_true_bin)),
-                        "min": float(np.min(y_true_bin)),
-                        "max": float(np.max(y_true_bin)),
-                        "q1": float(np.percentile(y_true_bin, 25)),
-                        "median": float(np.median(y_true_bin)),
-                        "q3": float(np.percentile(y_true_bin, 75))
-                    }
-                else:
-                    bad_rate.append(np.nan)
-                    stats_bin = {
-                        "mean": np.nan, "min": np.nan, "max": np.nan,
-                        "q1": np.nan, "median": np.nan, "q3": np.nan
-                    }
-                boxplot_stats.append(stats_bin)
-        else:
-            quantiles = np.linspace(0, 1, n_bins + 1)
-            bin_edges = np.quantile(y_pred, quantiles)
-            bin_edges = np.unique(bin_edges)
-            bins_indices = np.digitize(y_pred, bin_edges, right=True)
-            bin_labels = []
-            for i in range(1, len(bin_edges)):
-                mask = bins_indices == i
-                y_true_bin = y_true[mask]
-                count.append(np.sum(mask))
-                if np.sum(mask) > 0:
-                    bad_rate.append(np.mean(y_true_bin))
-                    stats_bin = {
-                        "mean": float(np.mean(y_true_bin)),
-                        "min": float(np.min(y_true_bin)),
-                        "max": float(np.max(y_true_bin)),
-                        "q1": float(np.percentile(y_true_bin, 25)),
-                        "median": float(np.median(y_true_bin)),
-                        "q3": float(np.percentile(y_true_bin, 75))
-                    }
-                else:
-                    bad_rate.append(np.nan)
-                    stats_bin = {
-                        "mean": np.nan, "min": np.nan, "max": np.nan,
-                        "q1": np.nan, "median": np.nan, "q3": np.nan
-                    }
-                boxplot_stats.append(stats_bin)
-                bin_labels.append(f"{bin_edges[i-1]:.3f} - {bin_edges[i]:.3f}")
+        # Calculate lift for each percentile
+        lift = []
+        overall_rate = np.mean(y_true)
+        
+        for pct in percentiles:
+            # Convert percentage to index
+            end_idx = int(np.ceil(pct * len(y_true) / 100))
+            if end_idx == 0:
+                lift.append(0)  # No data point yet
+                continue
+                
+            # Calculate default rate for this percentile
+            bin_true = y_true_sorted[:end_idx]
+            bin_rate = np.mean(bin_true)
+            lift_value = bin_rate / overall_rate if overall_rate > 0 else np.nan
+            lift.append(lift_value)
 
+        max_lift = max(lift)
+        max_pct = percentiles[lift.index(max_lift)]
+        
         return {
-            "bin_edges": bin_edges.tolist(),
-            "bad_rate": bad_rate,
-            "count": count,
-            "bin_labels": bin_labels if not is_discrete else bin_edges,
-            "boxplot_stats": boxplot_stats
+            "x": percentiles.tolist(),  # standardized x coordinate
+            "y": lift,                  # standardized y coordinate
+            "title": f"Lift Curve (Max Lift = {max_lift:.2f}x at {max_pct:.0f}%)",
+            "xlabel": "Population Percentile",
+            "ylabel": "Lift (Relative Default Rate)",
+            "use_percentage_ticks": True,
+            "n_total": len(y_true),
+            "n_defaults": int(np.sum(y_true))
+        }
+    
+class PDGainPlot(DistributionAssociationMetric):
+    """
+    Implements Gain Plotting.
+
+    Shows cumulative percentage of capture bads (or goods) as you move down the sorted population (usually sorted by predicted PD/score).
+    It goes from the worst scores to the best, e.g. shows:
+    With top 20% population we caputure 76% defaults.
+    
+    It looks really similar to CAP.
+    """
+    def _compute_raw(self, y_true, y_pred, **kwargs):
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        # Sort by predicted score descending (worst to best)
+        sorted_idx = np.argsort(-y_pred)
+        y_true_sorted = y_true[sorted_idx]
+        
+        # Create percentile points (0 to 100%)
+        percentiles = np.linspace(0, 100, 101)  # 101 points for 0% to 100% inclusive
+        
+        # Calculate cumulative defaults for each percentile
+        total_defaults = np.sum(y_true)
+        gains = []
+        
+        for pct in percentiles:
+            # Convert percentage to index
+            end_idx = int(np.ceil(pct * len(y_true) / 100))
+            if end_idx == 0:
+                gains.append(0)  # No data point yet
+                continue
+                
+            # Calculate cumulative defaults up to this percentile
+            cum_defaults = np.sum(y_true_sorted[:end_idx])
+            gain = (cum_defaults / total_defaults) * 100 if total_defaults > 0 else 0
+            gains.append(gain)
+
+        # Calculate capture rate at 20%
+        idx_20 = int(0.2 * len(y_true))
+        capture_20 = (np.sum(y_true_sorted[:idx_20]) / total_defaults * 100) if total_defaults > 0 else 0
+        
+        return {
+            "x": percentiles.tolist(),  # standardized x coordinate
+            "y": gains,                 # standardized y coordinate
+            "title": f"Gain Chart (Captures {capture_20:.1f}% defaults in top 20% population)",
+            "xlabel": "Population Percentile",
+            "ylabel": "Cumulative % of Defaults Captured",
+            "use_percentage_ticks": True,
+            "use_percentage_ticks_y": True,
+            "xlim": [0, 100],
+            "ylim": [0, 100],
+            "n_defaults": int(total_defaults),
+            "n_total": len(y_true)
         }

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from io import BytesIO
 import base64
+import pandas as pd
 
 from .config_loader import load_config
 from ..utils import helpers
@@ -258,12 +259,277 @@ class FigureResult:
 
     def __repr__(self):
         return f"<FigureResult {self.name}>"
-    
 
-class CurveMetric(BaseMetric):
-    """
-    Base class for metrics based on curves (e.g. ROC, CAP, PR, KS).
-    """
+class SubpopulationAnalysisMixin:
+    """Mixin for analyzing metrics across different subpopulations."""
+    
+    def _compute_by_group(self, y_true: np.ndarray, y_pred: np.ndarray, 
+                         group_index: np.ndarray,
+                         group_metadata: Dict = None) -> pd.DataFrame:
+        """Core implementation of subpopulation analysis."""
+        metadata = group_metadata or {}
+        group_type = metadata.get('type', 'custom')
+        group_name = metadata.get('name', 'group')
+        
+        results = []
+        unique_groups = np.sort(np.unique(group_index)) if group_type == 'time' else np.unique(group_index)
+        
+        for group in unique_groups:
+            mask = group_index == group
+            n_obs = np.sum(mask)
+            
+            if n_obs > 0:
+                result = self.compute(
+                    y_true=y_true[mask],
+                    y_pred=y_pred[mask]
+                )
+                
+                results.append({
+                    'group': group,
+                    'group_type': group_type,
+                    'n_obs': n_obs,
+                    'n_defaults': int(np.sum(y_true[mask])),
+                    'value': result.value,
+                    'passed': result.passed,
+                    **result.details
+                })
+        
+        return pd.DataFrame(results)
+
+    # User-friendly wrapper methods
+    def compute_over_time(self, y_true: np.ndarray, y_pred: np.ndarray, 
+                     time_index: np.ndarray, freq: str = 'Y') -> pd.DataFrame:
+        """
+        Compute metric over time periods.
+        
+        Parameters
+        ----------
+        time_index : array-like
+            Dates or time periods for each observation
+        freq : str
+            Frequency for aggregation ('M'=monthly, 'Q'=quarterly, 'Y'=yearly)
+        """
+        # Convert time_index to pandas datetime if it isn't already
+        time_index = pd.to_datetime(time_index)
+        
+        # Create period index based on frequency
+        if freq in ['M', 'Q', 'Y']:
+            periods = pd.date_range(
+                start=time_index.min(),
+                end=time_index.max(),
+                freq=freq
+            )
+            results = []
+            
+            # Compute metric for each period
+            for period_start in periods:
+                period_end = period_start + pd.tseries.frequencies.to_offset(freq)
+                mask = (time_index >= period_start) & (time_index < period_end)
+                
+                if np.sum(mask) > 0:  # Skip empty periods
+                    result = self.compute(
+                        y_true=y_true[mask],
+                        y_pred=y_pred[mask]
+                    )
+                    
+                    results.append({
+                        'group': period_start,
+                        'group_type': 'time',
+                        'group_name': 'period',
+                        'value': result.value,
+                        'passed': result.passed,
+                        'n_obs': len(y_true[mask]),
+                        'n_defaults': int(np.sum(y_true[mask])),
+                        **result.details
+                    })
+            
+            return pd.DataFrame(results)
+        else:
+            raise ValueError("Frequency must be one of: 'M', 'Q', 'Y'")
+
+    def compute_by_segment(self, y_true: np.ndarray, y_pred: np.ndarray,
+                          segments: np.ndarray, segment_labels: Dict = None) -> pd.DataFrame:
+        """
+        Compute metric for different segments.
+        
+        Parameters
+        ----------
+        segments : array-like
+            Segment identifier for each observation
+        segment_labels : dict, optional
+            Mapping of segment IDs to display labels
+        """
+        return self._compute_by_group(
+            y_true=y_true,
+            y_pred=y_pred,
+            group_index=segments,
+            group_metadata={
+                'type': 'segment',
+                'name': 'calibration_segment',
+                'labels': segment_labels
+            }
+        )
+
+    def compute_by_range(self, y_true: np.ndarray, y_pred: np.ndarray,
+                        values: np.ndarray, bins: Union[int, list] = 10,
+                        labels: list = None) -> pd.DataFrame:
+        """
+        Compute metric across value ranges (e.g., LTV ranges).
+        
+        Parameters
+        ----------
+        values : array-like
+            Values to bin (e.g., LTV values)
+        bins : int or list
+            Number of bins or custom bin edges
+        labels : list, optional
+            Custom labels for bins
+        """
+        if isinstance(bins, int):
+            group_index = pd.qcut(values, q=bins, labels=labels)
+        else:
+            group_index = pd.cut(values, bins=bins, labels=labels)
+            
+        return self._compute_by_group(
+            y_true=y_true,
+            y_pred=y_pred,
+            group_index=group_index,
+            group_metadata={'type': 'range', 'name': 'value_range'}
+        )
+
+    def plot_group_results(self, results: pd.DataFrame, style: Optional[Dict] = None) -> Dict:
+        """
+        Plot metric results across groups.
+        
+        Parameters
+        ----------
+        results : pd.DataFrame
+            DataFrame returned by compute_over_time/compute_by_segment/compute_by_range
+        style : Dict, optional
+            Style configuration dictionary
+            
+        Returns
+        -------
+        Dict
+            Dictionary containing plot image data and dimensions
+        """
+        if style is None:
+            style = self._style
+            
+        # Extract style configurations
+        colors = style.get('colors', {})
+        fig_style = style.get('figure', {})
+        grid_style = style.get('grid', {})
+        line_style = style.get('lines', {})
+        
+        fig, ax = plt.subplots(figsize=fig_style.get('size', [10, 6]))
+        
+        group_type = results['group_type'].iloc[0]
+        
+        if group_type == 'time':
+            # Time series plot
+            ax.plot(results['group'], results['value'],
+                   marker='o',
+                   color=colors.get('palette', ['#1f77b4'])[0],
+                   linewidth=line_style.get('main_width', 2),
+                   label=f"{self.__class__.__name__} Value")
+            
+            # Add threshold if exists
+            if 'threshold' in results.columns:
+                threshold = results['threshold'].iloc[0]
+                if threshold is not None:
+                    ax.axhline(y=threshold,
+                             color=colors.get('threshold', '#ff7f0e'),
+                             linestyle='--',
+                             alpha=line_style.get('reference_alpha', 0.5),
+                             label=f'Threshold ({threshold:.3f})')
+            
+            plt.xticks(rotation=45)
+            ax.set_xlabel('Period')
+            
+        else:  # segment or range analysis
+            # Bar plot with error bars if CI available
+            x = range(len(results))
+            ax.bar(x, results['value'],
+                   color=colors.get('palette', ['#1f77b4'])[0],
+                   alpha=0.7)
+            
+            if 'ci_lower' in results.columns and 'ci_upper' in results.columns:
+                ax.errorbar(x, results['value'],
+                           yerr=[results['value'] - results['ci_lower'],
+                                 results['ci_upper'] - results['value']],
+                           fmt='none',
+                           color='black',
+                           capsize=5)
+            
+            # Add threshold if exists
+            if 'threshold' in results.columns:
+                threshold = results['threshold'].iloc[0]
+                if threshold is not None:
+                    ax.axhline(y=threshold,
+                             color=colors.get('threshold', '#ff7f0e'),
+                             linestyle='--',
+                             alpha=line_style.get('reference_alpha', 0.5),
+                             label=f'Threshold ({threshold:.3f})')
+            
+            plt.xticks(x, results['group'], rotation=45)
+            ax.set_xlabel(results['group_name'].iloc[0].title())
+        
+        # Add sample size as secondary axis
+        ax2 = ax.twinx()
+        ax2.plot(range(len(results)), results['n_obs'],
+                 color='gray',
+                 linestyle=':',
+                 alpha=0.5,
+                 label='Sample Size')
+        ax2.set_ylabel('Sample Size')
+        
+        # Common styling
+        ax.set_ylabel(f"{self.__class__.__name__} Value")
+        ax.set_title(f"{self.__class__.__name__} by {group_type.title()}")
+        
+        if grid_style.get('show', True):
+            ax.grid(True,
+                   linestyle=grid_style.get('linestyle', '--'),
+                   alpha=grid_style.get('alpha', 0.3))
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='best')
+        
+        # Convert to image data
+        buf = BytesIO()
+        fig.tight_layout()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
+        image_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close(fig)
+        
+        return {
+            "image_base64": image_base64,
+            "width": fig.get_size_inches()[0] * fig.dpi,
+            "height": fig.get_size_inches()[1] * fig.dpi
+        }
+    
+    def show_group_plot(self, results: pd.DataFrame, style: Optional[Dict] = None):
+        """Display the group analysis plot."""
+        plot_data = self.plot_group_results(results, style)
+        img_data = base64.b64decode(plot_data["image_base64"])
+        img = plt.imread(BytesIO(img_data))
+        plt.imshow(img)
+        plt.axis('off')
+        plt.show()
+    
+    def save_group_plot(self, results: pd.DataFrame, filepath: str, style: Optional[Dict] = None):
+        """Save the group analysis plot to file."""
+        plot_data = self.plot_group_results(results, style)
+        img_data = base64.b64decode(plot_data["image_base64"])
+        with open(filepath, "wb") as f:
+            f.write(img_data)
+
+class CurveMetric(BaseMetric, SubpopulationAnalysisMixin):
+    """Base class for metrics based on curves (e.g. ROC, CAP, PR, KS)."""
 
     def __init__(self, model_name: str, config: Dict = None, config_path: str = None, **kwargs):
         super().__init__(model_name, config, config_path, **kwargs)
@@ -309,18 +575,73 @@ class CurveMetric(BaseMetric):
         else:
             self._style = style
 
-        palette = style["colors"]["palette"]
+        # Extract style configurations
+        colors = style.get('colors', {})
+        fig_style = style.get('figure', {})
+        grid_style = style.get('grid', {})
+        line_style = style.get('lines', {})
+        legend_style = style.get('legend', {})
+
+        # Create figure with consistent size
+        fig_size = fig_style.get('size', [8, 5])
+        fig, ax = plt.subplots(figsize=fig_size)
+
+        # Extract curve data and metadata
         x = figure_data['x']
         y = figure_data['y']
+        title = figure_data.get('title', 'Model Performance')
+        xlabel = figure_data.get('xlabel', 'Score')
+        ylabel = figure_data.get('ylabel', 'Performance')
         
-        fig, ax = plt.subplots()
-        ax.plot(x, y, color=palette[0], lw=2)
+        # Plot main curve with consistent style
+        ax.plot(x, y, 
+               color=colors.get('palette', ['#1f77b4'])[0],
+               alpha=line_style.get('main_alpha', 0.8),
+               linewidth=line_style.get('main_width', 2),
+               label='Model')
         
-        if style.get("show_diagonal", True):
-            ax.plot([0, 1], [0, 1], color='grey', lw=1, linestyle='--', label='Random')
+        # Add reference line if needed
+        if style.get('axes', {}).get('show_diagonal', True):
+            ax.plot([0, 1], [0, 1], 
+                   color=colors.get('reference_line', '#ff7f0e'),
+                   linestyle='--',
+                   alpha=line_style.get('reference_alpha', 0.5),
+                   linewidth=line_style.get('reference_width', 1.5),
+                   label='Random')
+
+        # Apply common styling
+        if grid_style.get('show', True):
+            ax.grid(True,
+                   linestyle=grid_style.get('linestyle', '--'),
+                   alpha=grid_style.get('alpha', 0.3),
+                   color=grid_style.get('color', '#cccccc'))
+
+        # Set axis labels with consistent font sizes
+        ax.set_xlabel(xlabel, fontsize=fig_style.get('label_fontsize', 10))
+        ax.set_ylabel(ylabel, fontsize=fig_style.get('label_fontsize', 10))
+        ax.set_title(title, fontsize=fig_style.get('title_fontsize', 12))
         
-        ax.legend()
-        ax.grid(True)
+        # Set axis limits if provided
+        if 'xlim' in figure_data:
+            ax.set_xlim(figure_data['xlim'])
+        if 'ylim' in figure_data:
+            ax.set_ylim(figure_data['ylim'])
+            
+        # Add percentage ticks if specified
+        if figure_data.get('use_percentage_ticks', False):
+            step = style.get('axes', {}).get('percentages', {}).get('step', 20)
+            ax.set_xticks(np.arange(0, 101, step))
+            ax.set_xticklabels([f"{x}%" for x in range(0, 101, step)])
+            if figure_data.get('use_percentage_ticks_y', False):
+                ax.set_yticks(np.arange(0, 101, step))
+                ax.set_yticklabels([f"{y}%" for y in range(0, 101, step)])
+
+        # Configure legend with consistent style
+        ax.legend(fontsize=legend_style.get('fontsize', 10),
+                 framealpha=legend_style.get('framealpha', 0.8))
+
+        # Set tick label sizes
+        ax.tick_params(labelsize=fig_style.get('tick_fontsize', 8))
         
         # Convert matplotlib figure to a dictionary representation
         buf = BytesIO()
@@ -344,7 +665,7 @@ class CurveMetric(BaseMetric):
         plt.axis('off')
         plt.show()
 
-    def save_plot(self, figure_data: Dict, filepath: str):
+    def save_plot(self, figure_data: Dict, filepath: str, style: Optional[Dict]=  None):
         """
         Save the plot to disk if needed.
         
@@ -355,15 +676,14 @@ class CurveMetric(BaseMetric):
         filepath : str
             Path where to save the plot
         """
-        img_data = base64.b64decode(figure_data["image_base64"])
+        plot_data = self._plot_curve(figure_data, style)
+        img_data = base64.b64decode(plot_data["image_base64"])
         with open(filepath, "wb") as f:
             f.write(img_data)
 
 
-class DistributionAssociationMetric(BaseMetric):
-    """
-    Base class for metrics based on distributions/associations (e.g. histograms, spearman correlation, kendall's tau, psi, etc.).
-    """
+class DistributionAssociationMetric(BaseMetric, SubpopulationAnalysisMixin):
+    """Base class for metrics based on distribution comparisons."""
     def __init__(self, model_name: str, config: Dict = None, config_path: str = None, **kwargs):
         super().__init__(model_name, config, config_path, **kwargs)
         # Move plt.rcParams update to initialization
@@ -392,103 +712,203 @@ class DistributionAssociationMetric(BaseMetric):
 
     def _calculate_distribution(self, figure_data: Dict, style: Optional[Dict] = None) -> Dict:
         """
-        Plot or calculate the distribution/association visualization.
-
-        So, this method is used for plotting, it receives figure data with standardized x and y; where x is score freq and y is obs freq
-
-        However, this will differ based on the source method, i.e. 
-        KS will return 2 series, with cumulative freq of bads and goods; x axis scaled from 0 to 1
-        HIST will also return 2 series, with frequencies of goods and bads, but for binned x
-        Quantile bad plot shows the same thing as KS plot IMO
-
+        Plot or calculate the distribution/association visualization with consistent styling.
+        
+        Parameters
+        ----------
+        figure_data : Dict
+            Dictionary containing data for visualization
+        style : Dict, optional
+            Style configuration dictionary; if no style is provided, default template is used
+            
         Returns
         -------
         Dict
             Dictionary containing base64 encoded image and dimensions
         """
-        fig, ax = plt.subplots(figsize=(8,5))
+        if style is None:
+            style = self._style
+        
+        # Extract style configurations
+        colors = style.get('colors', {})
+        fig_style = style.get('figure', {})
+        grid_style = style.get('grid', {})
+        line_style = style.get('lines', {})
+        hist_style = style.get('histogram', {})
+        legend_style = style.get('legend', {})
+        
+        # Create figure with consistent size
+        fig_size = fig_style.get('size', [8, 5])
+        fig, ax = plt.subplots(figsize=fig_size)
+        
         if self.__class__.__name__ == "ScoreHistogram":
             bin_edges = figure_data['bin_edges']
             hist_def = figure_data['hist_defaulted']
             hist_nondef = figure_data['hist_non_defaulted']
-            ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_nondef, alpha = 0.5, color = 'green', label='non-defaulted')
-            ax.hist(bin_edges[:-1], bins = bin_edges, weights=hist_def, alpha = 0.5, color = 'red', label='defaulted')
-            ax.set_xlabel("Score")
-            ax.set_ylabel("Count")
-            ax.legend()
-            ax.set_title("PD Model Scores Histogram")
+            
+            # Plot histograms with consistent colors and style
+            ax.hist(bin_edges[:-1], bins=bin_edges, weights=hist_nondef, 
+                   alpha=hist_style.get('alpha', 0.5),
+                   color=colors.get('non_defaulted', '#2ca02c'),
+                   label='Non-defaulted')
+            ax.hist(bin_edges[:-1], bins=bin_edges, weights=hist_def,
+                   alpha=hist_style.get('alpha', 0.5),
+                   color=colors.get('defaulted', '#d62728'),
+                   label='Defaulted')
+                   
+            ax.set_xlabel("Score", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_ylabel("Count", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_title("PD Model Scores Distribution", fontsize=fig_style.get('title_fontsize', 12))
+            
         elif self.__class__.__name__ == "KSDistPlot":
             x = figure_data['thresholds']
             cdf_good = np.asarray(figure_data['cdf_non_defaulted'])
             cdf_bad = np.asarray(figure_data['cdf_defaulted'])
-            ax.plot(x, cdf_good, color='green', label='Non-defaulted CDF')
-            ax.plot(x, cdf_bad, color='red', label='Defaulted CDF')
-            ax.set_xlabel("Score")
-            ax.set_ylabel("Cumulative Proportion")
-            ax.legend()
-            ax.set_title("KS Distribution Plot")
-            # Optionally, highlight KS statistic
+            
+            # Plot CDFs with consistent style
+            ax.plot(x, cdf_good, 
+                   color=colors.get('non_defaulted', '#2ca02c'),
+                   linewidth=line_style.get('main_width', 2),
+                   alpha=line_style.get('main_alpha', 0.8),
+                   label='Non-defaulted CDF')
+            ax.plot(x, cdf_bad,
+                   color=colors.get('defaulted', '#d62728'),
+                   linewidth=line_style.get('main_width', 2),
+                   alpha=line_style.get('main_alpha', 0.8),
+                   label='Defaulted CDF')
+                   
             if 'ks_stat' in figure_data and 'ks_threshold' in figure_data:
                 ks_stat = figure_data['ks_stat']
                 ks_x = figure_data['ks_threshold']
-                ax.vlines(ks_x, cdf_good[np.argmax(np.abs(cdf_good - cdf_bad))], cdf_bad[np.argmax(np.abs(cdf_good - cdf_bad))],
-                    color='blue', linestyle='--', label=f'KS={ks_stat:.3f}')
-                ax.legend()
-        elif self.__class__.__name__ == "QuantileBadPlot":
-            bin_labels = figure_data['bin_labels']
-            bad_rate = figure_data['bad_rate']
-            count = figure_data['count']
-            boxplot_data = figure_data['boxplot_data']  # Should be a list of lists/arrays, one per bin
-
-            # Plot bad rate as bar plot
-            ax.bar(bin_labels, bad_rate, color='red', alpha=0.6, label='Bad Rate')
-            ax.set_xlabel("Score Bin")
-            ax.set_ylabel("Bad Rate", color='red')
-            ax.tick_params(axis='y', labelcolor='red')
-
-            # Plot count as line plot on secondary y-axis
-            ax2 = ax.twinx()
-            ax2.plot(bin_labels, count, color='blue', marker='o', label='Count')
-            ax2.set_ylabel("Count", color='blue')
-            ax2.tick_params(axis='y', labelcolor='blue')
-
-            # Add boxplots for each bin
-            # Position boxplots at bin centers
-            positions = np.arange(len(bin_labels))
-            box = ax.boxplot(
-                boxplot_data,
-                positions=positions,
-                widths=0.5,
-                patch_artist=True,
-                boxprops=dict(facecolor='gray', alpha=0.3),
-                medianprops=dict(color='black'),
-                showfliers=False
-            )
-
-            # Adjust x-ticks to match bin labels
-            ax.set_xticks(positions)
-            ax.set_xticklabels(bin_labels)
-
-            ax.set_title("Bad Rate by Score Quantile (with Boxplots)")
-            # Combine legends from both axes
-            lines, labels = ax.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax2.legend(lines + lines2, labels + labels2, loc='upper right')
+                ax.vlines(ks_x, 
+                         cdf_good[np.argmax(np.abs(cdf_good - cdf_bad))],
+                         cdf_bad[np.argmax(np.abs(cdf_good - cdf_bad))],
+                         color=colors.get('reference_line', '#ff7f0e'),
+                         linestyle='--',
+                         alpha=line_style.get('reference_alpha', 0.5),
+                         label=f'KS={ks_stat:.3f}')
+                         
+            ax.set_xlabel("Score", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_ylabel("Cumulative Proportion", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_title("KS Distribution Plot", fontsize=fig_style.get('title_fontsize', 12))
+            
+        elif self.__class__.__name__ == "PDLiftPlot":
+            percentiles = figure_data['percentiles']
+            lift = figure_data['lift']
+            
+            # Plot lift curve with consistent style
+            ax.plot(percentiles, lift,
+                   color=colors.get('palette', ['#1f77b4'])[0],
+                   alpha=line_style.get('main_alpha', 0.8),
+                   linewidth=line_style.get('main_width', 2),
+                   label='Lift')
+            
+            # Add reference line
+            ax.axhline(y=1,
+                      color=colors.get('reference_line', '#ff7f0e'),
+                      linestyle='--',
+                      alpha=line_style.get('reference_alpha', 0.5),
+                      linewidth=line_style.get('reference_width', 1.5),
+                      label='Random Model')
+            
+            ax.set_xlabel("Population Percentile", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_ylabel("Lift (Relative Default Rate)", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_title("Default Rate Lift", fontsize=fig_style.get('title_fontsize', 12))
+            
+            # Set percentage ticks
+            step = style.get('axes', {}).get('percentages', {}).get('step', 20)
+            ax.set_xticks(np.arange(0, 101, step))
+            ax.set_xticklabels([f"{x}%" for x in range(0, 101, step)])
+            
+        elif self.__class__.__name__ == "PDGainPlot":
+            percentiles = figure_data['percentiles']
+            gains = figure_data['gains']
+            
+            # Plot gain curve with consistent style
+            ax.plot(percentiles, gains,
+                   color=colors.get('palette', ['#1f77b4'])[0],
+                   alpha=line_style.get('main_alpha', 0.8),
+                   linewidth=line_style.get('main_width', 2),
+                   label='Actual')
+            
+            # Add reference line
+            if style.get('axes', {}).get('show_diagonal', True):
+                ax.plot([0, 100], [0, 100],
+                       color=colors.get('reference_line', '#ff7f0e'),
+                       linestyle='--',
+                       alpha=line_style.get('reference_alpha', 0.5),
+                       linewidth=line_style.get('reference_width', 1.5),
+                       label='Random')
+            
+            ax.set_xlabel("Population Percentile", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_ylabel("Cumulative % of Defaults Captured", fontsize=fig_style.get('label_fontsize', 10))
+            ax.set_title("Gain Chart", fontsize=fig_style.get('title_fontsize', 12))
+            
+            # Set percentage ticks
+            step = style.get('axes', {}).get('percentages', {}).get('step', 20)
+            ax.set_xlim(0, 100)
+            ax.set_ylim(0, 100)
+            ax.set_xticks(np.arange(0, 101, step))
+            ax.set_yticks(np.arange(0, 101, step))
+            ax.set_xticklabels([f"{x}%" for x in range(0, 101, step)])
+            ax.set_yticklabels([f"{y}%" for y in range(0, 101, step)])
+            ax.legend(loc='lower right')
         else:
             raise NotImplementedError(f"Distribution plotting for {self.__class__.__name__} is not available.")
-        return ax
+            
+        # Apply common styling to all plots
+        if grid_style.get('show', True):
+            ax.grid(True,
+                   linestyle=grid_style.get('linestyle', '--'),
+                   alpha=grid_style.get('alpha', 0.3),
+                   color=grid_style.get('color', '#cccccc'))
+                   
+        # Configure legend with consistent style
+        ax.legend(fontsize=legend_style.get('fontsize', 10),
+                 framealpha=legend_style.get('framealpha', 0.8))
+                 
+        # Set tick label sizes
+        ax.tick_params(labelsize=fig_style.get('tick_fontsize', 8))
+        
+        # Convert matplotlib figure to a dictionary representation
+        buf = BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight')
+        buf.seek(0)
+        image_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close(fig)  # Clean up the figure
+        
+        return {
+            "image_base64": image_base64,
+            "width": fig.get_size_inches()[0] * fig.dpi,
+            "height": fig.get_size_inches()[1] * fig.dpi
+        }
 
     def show_plot(self, figure_data: Dict, style: Optional[Dict]=None):
         """
         Display the plot for the distribution/association metric.
         """
-        ax = self._calculate_distribution(figure_data, style)
+        plot_data = self._calculate_distribution(figure_data, style)
+        img_data = base64.b64decode(plot_data["image_base64"])
+        img = plt.imread(BytesIO(img_data))
+        plt.imshow(img)
+        plt.axis('off')
         plt.show()
 
-    def save_plot(self, figure_data: Dict, filepath: str):
+    def save_plot(self, figure_data: Dict, filepath: str, style: Optional[Dict]=None):
         """
-        Save the plot to disk if needed.
+        Save the plot to disk.
+        
+        Parameters
+        ----------
+        figure_data : Dict
+            The data to plot
+        filepath : str
+            Path where to save the plot
+        style : Dict, optional
+            Style configuration to use for the plot
         """
-        img_data = base64.b64decode(figure_data["image_base64"])
+        plot_data = self._calculate_distribution(figure_data, style)
+        img_data = base64.b64decode(plot_data["image_base64"])
         with open(filepath, "wb") as f:
             f.write(img_data)
+

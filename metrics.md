@@ -95,3 +95,12 @@
 
 # Stability
 - [ ] PSI (source: ECB_MV_INSTRUCTION)
+
+
+## Copilot context
+
+- Priorities: We're aiming to cover whole credit risk models' monitoring/validation toolkit, with all tests, reporting and viz
+- Use cases: I'd like it to be flexible, base scenario is regulatory reporting (and minimum tests' coverege must be aligned with regulatory req) but ultimately I want to be also a useful business tool
+- Reg requirments: We start with AIRB requirements, in the European context, so I want to be aligned with ECB/EBA requirements, but also consider local specificity from British/Polish regulators.
+- Data volumnes/frequency: I don't expect dataset larger then several million rows; frequency up to monthly 
+- Integration: this will be used for automated reporting via batch processing, i.e. all portfolios monitored at once with respective reports generated. No specific output format is needed, I'd prefer LaTeX
