@@ -432,11 +432,19 @@ class KSDistPlot(DistributionAssociationMetric):
         ks_threshold = thresholds[ks_idx]
 
         return {
-            "thresholds": thresholds.tolist(),
-            "cdf_defaulted": cdf_def.tolist(),
-            "cdf_non_defaulted": cdf_nondef.tolist(),
-            "ks_stat": float(ks_stat),
-            "ks_threshold": float(ks_threshold)
+            "x": thresholds.tolist(), #thresholds
+            "y": cdf_def.tolist(), #cdf_defaulted
+            "x_ref": thresholds.tolist(), #thresholds
+            "y_ref": cdf_nondef.tolist(), #cdf_non_defaulted
+            "actual_label": "CDF defaulted",
+            "ref_label": "CDF nondefaulted",
+            "value": float(ks_stat), #ks_stat
+            "title": f"KS Distribution Plot (KS = {ks_stat:.3f})",
+            "xlabel": "Score",
+            "ylabel": "Cumulative Proportion",
+            "n_obs": len(y_true),
+            "n_defaults": int(np.sum(y_true)),
+            "ks_threshold": float(ks_threshold) #ks_threshold - it is not used after changes?
         }
 
 class ScoreHistogram(DistributionAssociationMetric):
@@ -460,17 +468,20 @@ class ScoreHistogram(DistributionAssociationMetric):
         hist_def, _ = np.histogram(scores_def, bins=bin_edges)
         hist_nondef, _ = np.histogram(scores_nondef, bins=bin_edges)
 
-        default_rate = len(scores_def) / len(y_pred) * 100
+        default_rate = np.mean(y_true) * 100
         
         return {
-            "bin_edges": bin_edges.tolist(),
-            "hist_defaulted": hist_def.tolist(),
-            "hist_non_defaulted": hist_nondef.tolist(),
-            "title": f"Score Distribution (Default Rate: {default_rate:.1f}%)",
-            "xlabel": "Score",
-            "ylabel": "Count",
-            "n_defaults": len(scores_def),
-            "n_non_defaults": len(scores_nondef)
+            "x_def": bin_edges[:-1].tolist(), # bin_edges
+            "y_def": hist_def.tolist(), # hist_defaulted
+            "x_ndef": bin_edges[:-1].tolist(), # bin_edges - not present before changes
+            "y_ndef": hist_nondef.tolist(), # hist_non_defaulted
+            "bin_edges": bin_edges.tolist(), # bin_edges - not present before changes
+            "title": f"Score Distribution (Default Rate: {default_rate:.1f}%)", # title
+            "xlabel": "Score", # xlabel
+            "ylabel": "Count", # ylabel
+            "n_defaults": len(scores_def), # n_defaults
+            "n_non_defaults": len(scores_nondef), # n_non_defaults
+            "n_obs": len(y_true) # n_obs
         }
 
 class PDLiftPlot(DistributionAssociationMetric):
@@ -515,11 +526,14 @@ class PDLiftPlot(DistributionAssociationMetric):
         return {
             "x": percentiles.tolist(),  # standardized x coordinate
             "y": lift,                  # standardized y coordinate
+            "x_ref": percentiles.tolist(),  # reference line x (same as x)
+            "y_ref": [1] * len(percentiles),  # reference line y (lift = 1)
+            "value": max_lift,  # max lift value
             "title": f"Lift Curve (Max Lift = {max_lift:.2f}x at {max_pct:.0f}%)",
             "xlabel": "Population Percentile",
             "ylabel": "Lift (Relative Default Rate)",
             "use_percentage_ticks": True,
-            "n_total": len(y_true),
+            "n_obs": len(y_true),
             "n_defaults": int(np.sum(y_true))
         }
     
@@ -561,12 +575,14 @@ class PDGainPlot(DistributionAssociationMetric):
             gains.append(gain)
 
         # Calculate capture rate at 20%
-        idx_20 = int(0.2 * len(y_true))
-        capture_20 = (np.sum(y_true_sorted[:idx_20]) / total_defaults * 100) if total_defaults > 0 else 0
+        capture_20 = gains[20]
         
         return {
             "x": percentiles.tolist(),  # standardized x coordinate
             "y": gains,                 # standardized y coordinate
+            "x_ref": percentiles.tolist(),  # reference line x (same as x)
+            "y_ref": percentiles.tolist(),  # Diagonal Reference Line
+            "value": capture_20,  # capture rate at 20%
             "title": f"Gain Chart (Captures {capture_20:.1f}% defaults in top 20% population)",
             "xlabel": "Population Percentile",
             "ylabel": "Cumulative % of Defaults Captured",
@@ -575,5 +591,5 @@ class PDGainPlot(DistributionAssociationMetric):
             "xlim": [0, 100],
             "ylim": [0, 100],
             "n_defaults": int(total_defaults),
-            "n_total": len(y_true)
+            "n_obs": len(y_true)
         }
