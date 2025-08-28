@@ -189,10 +189,7 @@ class SubpopulationAnalysisMixin:
         Dict
             Dictionary containing plot image data and dimensions
         """
-        # Use the metric_type property instead of class checking
         service = self._apply_style(style)
-        
-        # Use the centralized plotting service
         return service._plot_group_analysis(results, self.metric_type)
     
     def show_group_plot(self, results: pd.DataFrame, style: Optional[Dict] = None):
@@ -389,10 +386,7 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
         Show the plot with the given figure data and style.
         """
         service = self._apply_style(style)
-        if self.metric_type == "curve":
-            plot_data = service._plot_curve(figure_data)
-        else:
-            plot_data = service._plot_distribution(figure_data)
+        plot_data = service.plot(figure_data, plot_type=self.metric_type)
         service.display_image(plot_data)
 
     def save_plot(self, figure_data: Dict, filepath: str, style: Optional[Dict] = None):
@@ -409,10 +403,7 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
             Style configuration to use
         """
         service = self._apply_style(style)
-        if self.metric_type == "curve":
-            plot_data = service._plot_curve(figure_data)
-        else:
-            plot_data = service._plot_distribution(figure_data)
+        plot_data = service.plot(figure_data, plot_type=self.metric_type)
         service.save_image(plot_data, filepath)
 
     @property
