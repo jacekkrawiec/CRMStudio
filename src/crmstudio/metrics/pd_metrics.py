@@ -1,18 +1,21 @@
 import math
-from ..core.base import BaseMetric, CurveMetric, DistributionAssociationMetric, FigureResult
+from ..core.base import BaseMetric, MetricResult
 import numpy as np
 from scipy import stats
 from sklearn.metrics import roc_auc_score, roc_curve
 from typing import Tuple, Union
 
-class AUC(CurveMetric):
+class AUC(BaseMetric):
     """
     AUC (Area Under the ROC Curve) metric.
     
     This metric calculates the area under the ROC curve, 
     which is a measure of the model's ability to distinguish between classes.
     """
-    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
+    def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         """
         Calculate the AUC score.
         
@@ -20,19 +23,20 @@ class AUC(CurveMetric):
         :param y_pred: Target scores, can either be probability estimates of the positive class, confidence values, or binary decisions.
         :return: AUC score as a MetricResult object.
         """
-        if fr is not None:
-            fpr = np.array(fr['x'])
-            tpr = np.array(fr['y'])
-            # Calculate AUC using trapezoidal rule 
-            auc_score = np.trapz(tpr, fpr)
-            return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
-        elif y_true is not None and y_pred is not None:
+        if y_true is not None and y_pred is not None:
             auc_score = roc_auc_score(y_true, y_pred)
-            return auc_score, {"n_obs": len(y_true), "n_defaults": int(np.sum(y_true))}
+            return MetricResult(
+                name=self.__class__.__name__, 
+                value=auc_score, 
+                details={
+                    "n_obs": len(y_true), 
+                    "n_defaults": int(np.sum(y_true))
+                    }
+                )
         else:
-            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
+            raise ValueError("Both 'y_true' and 'y_pred' must be provided.")
 
-class AUCDelta(CurveMetric):
+class AUCDelta(BaseMetric):
     """
     Calculate the difference in AUC between two time periods following ECB methodology.
     
@@ -44,6 +48,8 @@ class AUCDelta(CurveMetric):
     Reference: 
     https://www.bankingsupervision.europa.eu/activities/internal_models/shared/pdf/instructions_validation_reporting_credit_risk.en.pdf
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     # ------- Core ECB Annex 1 helper -------
     @staticmethod
     def _rowwise_u_components(def_scores: np.ndarray, ndef_scores_sorted: np.ndarray) -> Tuple[np.ndarray,np.ndarray]:
@@ -155,67 +161,98 @@ class AUCDelta(CurveMetric):
             "p_value": p_value,
             "decision": "pass" if p_value > alpha else "fail"
         }
-        return float(p_value), details   
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=p_value, 
+            details=details
+            )
       
 
-class ROCCurve(CurveMetric):
+class ROCCurve(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Generate ROC curve coordinates with AUC statistic.
     """
     def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
         auc_score = roc_auc_score(y_true, y_pred)
-        
-        return {
-            "x": fpr.tolist(),  # Standardized coordinate naming
-            "y": tpr.tolist(),  # Standardized coordinate naming
-            "thresholds": thresholds.tolist(),
-            "auc": float(auc_score),
-            "title": f"ROC Curve (AUC = {auc_score:.3f})",
-            "xlabel": "False Positive Rate",
-            "ylabel": "True Positive Rate"
-        }
+        return MetricResult(
+                name=self.__class__.__name__, 
+                value=auc_score, 
+                figure_data={
+                    "x": fpr.tolist(),  # Standardized coordinate naming
+                    "y": tpr.tolist(),  # Standardized coordinate naming
+                    "thresholds": thresholds.tolist(),
+                    "title": f"ROC Curve (AUC = {auc_score:.3f})",
+                    "xlabel": "False Positive Rate",
+                    "ylabel": "True Positive Rate"
+                }
+            )
 
-class PietraIndex(CurveMetric):
+class PietraIndex(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Pietra index (maximum deviation of ROC curve from diagonal).
     """
-    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
-        if fr is not None:
-            fpr = np.asarray(fr['x'])
-            tpr = np.asarray(fr['y'])
-        elif y_pred is not None and y_true is not None:
+    def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
+        if y_pred is not None and y_true is not None:
             fpr, tpr, _ = roc_curve(y_true, y_pred)
         else:
-            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
+            raise ValueError("Both 'y_true' and 'y_pred' must be provided.")
         diagonal_dist = np.abs(tpr - fpr) / np.sqrt(2)
-        return np.max(diagonal_dist)
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=np.max(diagonal_dist), 
+            details={
+                "n_obs": len(y_true), 
+                "n_defaults": int(np.sum(y_true))
+            }
+        )
 
-class KSStat(CurveMetric):
+class KSStat(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kolmogorov-Smirnov statistic.
     """
-    def _compute_raw(self, fr: FigureResult = None, y_true = None, y_pred = None, **kwargs):
-        if fr is not None:
-            fpr = np.asarray(fr['x'])
-            tpr = np.asarray(fr['y'])
-        elif y_pred is not None and y_true is not None:
+    def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
+        if y_pred is not None and y_true is not None:
             fpr, tpr, _ = roc_curve(y_true, y_pred)
         else:
-            raise ValueError("Either 'fr' (FigureResult) or both 'y_true' and 'y_pred' must be provided.")
+            raise ValueError("Both 'y_true' and 'y_pred' must be provided.")
         ks_stat = np.max(np.abs(tpr - fpr))
-        return ks_stat
-    
-class Gini(CurveMetric):
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=ks_stat, 
+            details={
+                "n_obs": len(y_true), 
+                "n_defaults": int(np.sum(y_true))
+            }
+        )
+
+class Gini(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Gini coefficient (2*AUC - 1).
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         auc = roc_auc_score(y_true, y_pred)
         gini = 2 * auc - 1
-        return gini
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=gini, 
+            details={
+                "n_obs": len(y_true), 
+                "n_defaults": int(np.sum(y_true))
+            }
+        )
 
-class GiniCI(CurveMetric):
+class GiniCI(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Gini coefficient with confidence intervals.
     """
@@ -235,11 +272,20 @@ class GiniCI(CurveMetric):
         z = stats.norm.ppf(1 - (1 - confidence) / 2)
         ci_lower = max(0, gini - z * 2 * se)
         ci_upper = min(1, gini + z * 2 * se)
-        
-        return {"gini": gini, "ci_lower": ci_lower, "ci_upper": ci_upper}
+
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=gini,
+            details={
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper
+            }
+        )
 
 
-class CAPCurve(CurveMetric):
+class CAPCurve(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Generate Cumulative Accuracy Profile curve coordinates.
     
@@ -271,19 +317,24 @@ class CAPCurve(CurveMetric):
         # AR = 2*AUC - 1
         auc = roc_auc_score(y_true, y_pred)
         ar = 2 * auc - 1
-    
-        return {
-            "x": x.tolist(), 
-            "y": y.tolist(),
-            "ar": float(ar),
-            "title": f"CAP Curve (AR = {ar:.3f})",
-            "xlabel": "Fraction of Population",
-            "ylabel": "Fraction of Defaults Captured",
-            "n_defaults": int(total_pos),
-            "n_total": len(y_true)
-        }
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=auc, 
+            figure_data={
+                "x": x.tolist(), 
+                "y": y.tolist(),
+                "ar": float(ar),
+                "title": f"CAP Curve (AR = {ar:.3f})",
+                "xlabel": "Fraction of Population",
+                "ylabel": "Fraction of Defaults Captured",
+                "n_defaults": int(total_pos),
+                "n_total": len(y_true)
+            }
+        )
 
-class CIER(DistributionAssociationMetric):
+class CIER(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Conditional Information Entropy Ratio (CIER).
     
@@ -320,9 +371,16 @@ class CIER(DistributionAssociationMetric):
         
         # Calculate CIER
         cier = 1 - h_y_x / (h_y + 1e-10)
-        return cier
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=cier, 
+            details={
+            }
+        )
 
-class KLDistance(DistributionAssociationMetric):
+class KLDistance(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kullback-Leibler divergence between predicted and actual distributions.
     """
@@ -337,9 +395,18 @@ class KLDistance(DistributionAssociationMetric):
         hist_pred = hist_pred + eps
         
         kl_div = np.sum(hist_true * np.log(hist_true / hist_pred))
-        return kl_div
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=kl_div, 
+            details={
+                "hist_true": hist_true,
+                "hist_pred": hist_pred
+            }
+        )
 
-class InformationValue(DistributionAssociationMetric):
+class InformationValue(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Information Value (IV) for the model predictions.
     """
@@ -383,26 +450,44 @@ class InformationValue(DistributionAssociationMetric):
                 
                 iv = (good_rate - bad_rate) * np.log(good_rate / bad_rate)
                 iv_total += iv
-                
-        return iv_total
 
-class KendallsTau(DistributionAssociationMetric):
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=iv_total,
+            details={}
+        )
+
+class KendallsTau(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kendall's Tau correlation coefficient.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         tau, _ = stats.kendalltau(y_true, y_pred)
-        return tau
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=tau,
+            details={}
+        )
 
-class SpearmansRho(DistributionAssociationMetric):
+class SpearmansRho(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Spearman's rank correlation coefficient.
     """
     def _compute_raw(self, y_true, y_pred, **kwargs):
         rho, _ = stats.spearmanr(y_true, y_pred)
-        return rho
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=rho,
+            details={}
+        )
 
-class KSDistPlot(DistributionAssociationMetric):
+class KSDistPlot(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculates cumulative distribution function of defaulted and non-defaulted populations.
     Shows maximum separation point, i.e. KS statistic.
@@ -430,24 +515,28 @@ class KSDistPlot(DistributionAssociationMetric):
         ks_stat = np.max(np.abs(cdf_def - cdf_nondef))
         ks_idx = np.argmax(np.abs(cdf_def - cdf_nondef))
         ks_threshold = thresholds[ks_idx]
+        return MetricResult(
+                name=self.__class__.__name__, 
+                value=float(ks_stat), 
+                figure_data={
+                    "x": thresholds.tolist(), #thresholds
+                    "y": cdf_def.tolist(), #cdf_defaulted
+                    "x_ref": thresholds.tolist(), #thresholds
+                    "y_ref": cdf_nondef.tolist(), #cdf_non_defaulted
+                    "actual_label": "CDF defaulted",
+                    "ref_label": "CDF nondefaulted",
+                    "title": f"KS Distribution Plot (KS = {ks_stat:.3f})",
+                    "xlabel": "Score",
+                    "ylabel": "Cumulative Proportion",
+                    "n_obs": len(y_true),
+                    "n_defaults": int(np.sum(y_true)),
+                    "ks_threshold": float(ks_threshold) #ks_threshold - it is not used after changes?
+                }
+            )
 
-        return {
-            "x": thresholds.tolist(), #thresholds
-            "y": cdf_def.tolist(), #cdf_defaulted
-            "x_ref": thresholds.tolist(), #thresholds
-            "y_ref": cdf_nondef.tolist(), #cdf_non_defaulted
-            "actual_label": "CDF defaulted",
-            "ref_label": "CDF nondefaulted",
-            "value": float(ks_stat), #ks_stat
-            "title": f"KS Distribution Plot (KS = {ks_stat:.3f})",
-            "xlabel": "Score",
-            "ylabel": "Cumulative Proportion",
-            "n_obs": len(y_true),
-            "n_defaults": int(np.sum(y_true)),
-            "ks_threshold": float(ks_threshold) #ks_threshold - it is not used after changes?
-        }
-
-class ScoreHistogram(DistributionAssociationMetric):
+class ScoreHistogram(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculates 2 histograms of scores, one per each value of y_true,
     i.e. histogram of scores for defaulted and non-defaulted population.
@@ -469,22 +558,27 @@ class ScoreHistogram(DistributionAssociationMetric):
         hist_nondef, _ = np.histogram(scores_nondef, bins=bin_edges)
 
         default_rate = np.mean(y_true) * 100
-        
-        return {
-            "x_def": bin_edges[:-1].tolist(), # bin_edges
-            "y_def": hist_def.tolist(), # hist_defaulted
-            "x_ndef": bin_edges[:-1].tolist(), # bin_edges - not present before changes
-            "y_ndef": hist_nondef.tolist(), # hist_non_defaulted
-            "bin_edges": bin_edges.tolist(), # bin_edges - not present before changes
-            "title": f"Score Distribution (Default Rate: {default_rate:.1f}%)", # title
-            "xlabel": "Score", # xlabel
-            "ylabel": "Count", # ylabel
-            "n_defaults": len(scores_def), # n_defaults
-            "n_non_defaults": len(scores_nondef), # n_non_defaults
-            "n_obs": len(y_true) # n_obs
-        }
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=np.nan, 
+            figure_data={
+                "x_def": bin_edges[:-1].tolist(), # bin_edges
+                "y_def": hist_def.tolist(), # hist_defaulted
+                "x_ndef": bin_edges[:-1].tolist(), # bin_edges - not present before changes
+                "y_ndef": hist_nondef.tolist(), # hist_non_defaulted
+                "bin_edges": bin_edges.tolist(), # bin_edges - not present before changes
+                "title": f"Score Distribution (Default Rate: {default_rate:.1f}%)", # title
+                "xlabel": "Score", # xlabel
+                "ylabel": "Count", # ylabel
+                "n_defaults": len(scores_def), # n_defaults
+                "n_non_defaults": len(scores_nondef), # n_non_defaults
+                "n_obs": len(y_true) # n_obs
+            }
+        )
 
-class PDLiftPlot(DistributionAssociationMetric):
+class PDLiftPlot(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Implements Lift Plotting.
 
@@ -522,22 +616,27 @@ class PDLiftPlot(DistributionAssociationMetric):
 
         max_lift = max(lift)
         max_pct = percentiles[lift.index(max_lift)]
-        
-        return {
-            "x": percentiles.tolist(),  # standardized x coordinate
-            "y": lift,                  # standardized y coordinate
-            "x_ref": percentiles.tolist(),  # reference line x (same as x)
-            "y_ref": [1] * len(percentiles),  # reference line y (lift = 1)
-            "value": max_lift,  # max lift value
-            "title": f"Lift Curve (Max Lift = {max_lift:.2f}x at {max_pct:.0f}%)",
-            "xlabel": "Population Percentile",
-            "ylabel": "Lift (Relative Default Rate)",
-            "use_percentage_ticks": True,
-            "n_obs": len(y_true),
-            "n_defaults": int(np.sum(y_true))
-        }
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=np.nan, 
+            figure_data={
+                "x": percentiles.tolist(),  # standardized x coordinate
+                "y": lift,                  # standardized y coordinate
+                "x_ref": percentiles.tolist(),  # reference line x (same as x)
+                "y_ref": [1] * len(percentiles),  # reference line y (lift = 1)
+                "value": max_lift,  # max lift value
+                "title": f"Lift Curve (Max Lift = {max_lift:.2f}x at {max_pct:.0f}%)",
+                "xlabel": "Population Percentile",
+                "ylabel": "Lift (Relative Default Rate)",
+                "use_percentage_ticks": True,
+                "n_obs": len(y_true),
+                "n_defaults": int(np.sum(y_true))
+            }
+        )
     
-class PDGainPlot(DistributionAssociationMetric):
+class PDGainPlot(BaseMetric):
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Implements Gain Plotting.
 
@@ -576,20 +675,23 @@ class PDGainPlot(DistributionAssociationMetric):
 
         # Calculate capture rate at 20%
         capture_20 = gains[20]
-        
-        return {
-            "x": percentiles.tolist(),  # standardized x coordinate
-            "y": gains,                 # standardized y coordinate
-            "x_ref": percentiles.tolist(),  # reference line x (same as x)
-            "y_ref": percentiles.tolist(),  # Diagonal Reference Line
-            "value": capture_20,  # capture rate at 20%
-            "title": f"Gain Chart (Captures {capture_20:.1f}% defaults in top 20% population)",
-            "xlabel": "Population Percentile",
-            "ylabel": "Cumulative % of Defaults Captured",
-            "use_percentage_ticks": True,
-            "use_percentage_ticks_y": True,
-            "xlim": [0, 100],
-            "ylim": [0, 100],
-            "n_defaults": int(total_defaults),
-            "n_obs": len(y_true)
-        }
+        return MetricResult(
+            name=self.__class__.__name__, 
+            value=capture_20, 
+            figure_data={
+                "x": percentiles.tolist(),  # standardized x coordinate
+                "y": gains,                 # standardized y coordinate
+                "x_ref": percentiles.tolist(),  # reference line x (same as x)
+                "y_ref": percentiles.tolist(),  # Diagonal Reference Line
+                "value": capture_20,  # capture rate at 20%
+                "title": f"Gain Chart (Captures {capture_20:.1f}% defaults in top 20% population)",
+                "xlabel": "Population Percentile",
+                "ylabel": "Cumulative % of Defaults Captured",
+                "use_percentage_ticks": True,
+                "use_percentage_ticks_y": True,
+                "xlim": [0, 100],
+                "ylim": [0, 100],
+                "n_defaults": int(total_defaults),
+                "n_obs": len(y_true)
+            }
+        )

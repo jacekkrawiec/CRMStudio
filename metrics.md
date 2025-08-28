@@ -104,3 +104,7 @@
 - Reg requirments: We start with AIRB requirements, in the European context, so I want to be aligned with ECB/EBA requirements, but also consider local specificity from British/Polish regulators.
 - Data volumnes/frequency: I don't expect dataset larger then several million rows; frequency up to monthly 
 - Integration: this will be used for automated reporting via batch processing, i.e. all portfolios monitored at once with respective reports generated. No specific output format is needed, I'd prefer LaTeX
+
+## Code refactoring
+- We have too much inconsistency in the way data is created and transferred to transformators/plotters; we should keep one format of data returned by metrics
+- We should have single plotting mechanism
