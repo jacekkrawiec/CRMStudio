@@ -282,7 +282,11 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
 
         #apply threshold if exists
         if result.value is not None and result.threshold is None:
+            # Try to get threshold from different possible locations
             threshold = self.metric_config.get('threshold')
+            if threshold is None and 'params' in self.metric_config:
+                threshold = self.metric_config.get('params', {}).get('threshold')
+            
             if threshold is not None:
                 result.threshold = threshold
                 result.passed = result.value >= threshold

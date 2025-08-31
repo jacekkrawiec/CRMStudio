@@ -69,6 +69,26 @@ def generate_input(n_samples=10000):
 print("Generating test data...")
 df = generate_input()
 
+#Testing AUC with threshold
+
+config = {"models": {"test_model": {"metrics": [{
+                    "name": "auc",
+                    "threshold": 0.8
+                }
+            ]
+        }
+    }
+}
+
+
+auc = metrics.pd_metrics.AUC("test_model", config = config)
+auc.config
+result = auc.compute(y_true=df['y_true'], y_pred=df['y_pred'])
+result.passed
+
+assert result.threshold == 0.8
+assert result.passed is True  # 1.0 >= 0.8
+
 # Example 1: Individual metric with show_plot
 print("\nExample 1: Individual metric with show_plot")
 roc = metrics.pd_metrics.ROCCurve("pd_model")

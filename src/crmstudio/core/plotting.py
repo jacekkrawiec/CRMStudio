@@ -141,6 +141,10 @@ class PlottingService:
             
             for dataset in results:
                 for label, value in dataset.items():
+                    # Convert any datetime/period objects to strings to avoid plotting issues
+                    if isinstance(label, (pd.Period, pd.Timestamp)):
+                        label = str(label)
+                    
                     labels.append(label)
                     values.append(value if not isinstance(value, dict) else value.get('value', 0))
             
@@ -160,16 +164,36 @@ class PlottingService:
         if 'results_df' in figure_data:
             # Collect all data in results_df into datasets list
             results_df = figure_data['results_df']
-            if 'group' not in results_df or 'figure_data' not in results_df:
-                raise ValueError("Invalid results_df format.")
-            for label, row in zip(results_df['group'], results_df['figure_data']):
-                if row is None:
-                    row = results_df.loc[results_df['group'] == label, 'value'].values[0]
-                datasets.append({label: row})
+            
+            # Verify that the required columns exist
+            if 'group' not in results_df.columns:
+                raise ValueError("results_df must contain a 'group' column")
+            
+            if 'figure_data' not in results_df.columns and 'value' not in results_df.columns:
+                raise ValueError("results_df must contain either 'figure_data' or 'value' column")
+            
+            # Handle time-based indices by converting them to strings
+            has_figure_data = 'figure_data' in results_df.columns
+            
+            for i, row in results_df.iterrows():
+                label = row['group']
+                # Convert Period or Timestamp objects to strings
+                if isinstance(label, (pd.Period, pd.Timestamp)):
+                    label = str(label)
+                
+                if has_figure_data:
+                    data = row['figure_data']
+                    if data is None and 'value' in row:
+                        data = row['value']
+                else:
+                    data = row['value']
+                
+                datasets.append({label: data})
         else:
             # If no results_df, we treat it as a single dataset
             # Collect all data, not only name, x and y
-            datasets.append({"Full sample":figure_data})
+            datasets.append({"Full sample": figure_data})
+        
         return datasets
 
     def _plot_curve(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
