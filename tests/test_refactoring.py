@@ -57,7 +57,8 @@ def test_curve_plotting():
     # Test segment analysis
     print("Testing segment analysis...")
     segment_results = roc.compute_by_segment(y_true=y_true, y_pred=y_pred, segments=segments)
-    print(segment_results[['group', 'value']])
+    results_df = segment_results.figure_data.get('results_df')
+    print(results_df[['group', 'value']])
     
     # Test group plotting
     print("Plotting segment analysis...")
@@ -66,7 +67,8 @@ def test_curve_plotting():
     # Test time analysis
     print("Testing time analysis...")
     time_results = roc.compute_over_time(y_true=y_true, y_pred=y_pred, time_index=time_var, freq='Q')
-    print(time_results[['group', 'value']])
+    results_df = time_results.figure_data.get('results_df')
+    print(results_df[['group', 'value']])
     
     # Test group plotting for time
     print("Plotting time analysis...")
@@ -93,7 +95,8 @@ def test_distribution_plotting():
     # Test segment analysis
     print("Testing segment analysis...")
     segment_results = ks.compute_by_segment(y_true=y_true, y_pred=y_pred, segments=segments)
-    print(segment_results[['group', 'value']])
+    results_df = segment_results.figure_data.get('results_df')
+    print(results_df[['group', 'value']])
     
     # Test group plotting
     print("Plotting segment analysis...")

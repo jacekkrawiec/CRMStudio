@@ -1,13 +1,11 @@
 import numpy as np
 import importlib
 from crmstudio import metrics, core
-from crmstudio.metrics.pd_metrics import PDLiftPlot, PDGainPlot, KSDistPlot, ScoreHistogram, CAPCurve, ROCCurve
-from crmstudio.core.base import BaseMetric
-from crmstudio.utils import helpers
 import pandas as pd
 
 # Reload modules to see the latest changes
 importlib.reload(core.base)
+importlib.reload(core.plotting)
 importlib.reload(metrics.pd_metrics)
 importlib.reload(metrics)
 
@@ -42,6 +40,24 @@ def generate_input(n_samples = 10000):
 
 df = generate_input()
 
+
+metric = metrics.pd_metrics.PDGainPlot("pd_model")
+results = metric.compute(y_true=df['y_true'], y_pred=df['y_pred'], segments=df['region'])
+metric.show_plot(results.figure_data)
+
+metric = metrics.pd_metrics.PDGainPlot("pd_model")
+results = metric.compute_by_segment(y_true=df['y_true'], y_pred=df['y_pred'], segments=df['region'])
+metric.show_group_plot(results)
+
+
+
+
+
+
+results = metric.compute_by_segment(y_true=df['y_true'], y_pred=df['y_pred'], segments=df['region'])
+metric.show_group_plot(results)
+results.figure_data.keys()
+metric.metric_type
 
 #add legend to ROC by group.
 auc = metrics.pd_metrics.KSDistPlot("pd_model")

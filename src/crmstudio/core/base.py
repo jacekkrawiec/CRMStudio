@@ -2,7 +2,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Tuple, Optional, Union
 import numpy as np
-from dataclasses import dataclass, field
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -10,59 +9,15 @@ import matplotlib.pyplot as plt
 
 from .config_loader import load_config
 from ..utils import helpers
+from .data_classes import MetricResult
 from .plotting import PlottingService
-
-@dataclass
-class MetricResult:
-    """
-    Unified result class for all metrics.
-
-    """
-    name: str
-    value: Optional[float] = None
-    threshold: Optional[float] = None
-    passed: Optional[bool] = None
-    details: Dict[str, Any] = field(default_factory=dict)
-    figure_data: Optional[Dict[str, Any]] = None 
-
-    def has_figure(self) -> bool:
-        """Check if this result contains figure data"""
-        return self.figure_data is not None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary representation for serialization."""
-        result = {
-            'metric': self.name,
-            'type': 'figure' if self.has_figure() else 'scalar'
-        }
-
-        if self.value is not None:
-            result['value'] = self.value
-        
-        if self.threshold is not None:
-            result['threshold'] = self.threshold
-            result['passed'] = self.passed
-        
-        if self.details:
-            result['details'] = self.details
-
-        if self.figure_data:
-            result['figure_data'] = self.figure_data
-
-        return result
-    
-    def __repr__(self) -> str:
-        if self.has_figure():
-            return f"<MetricResult {self.name} (figure)>"
-        else:
-            return f"<MetricResult {self.name}: {self.value:.4f}, passes = {self.passed}>"
 
 class SubpopulationAnalysisMixin:
     """Mixin for analyzing metrics across different subpopulations."""
     
     def _compute_by_group(self, y_true: np.ndarray, y_pred: np.ndarray, 
                          group_index: np.ndarray,
-                         group_metadata: Dict = None) -> pd.DataFrame:
+                         group_metadata: Dict = None) -> MetricResult:
         """Core implementation of subpopulation analysis."""
         metadata = group_metadata or {}
         group_type = metadata.get('type', 'custom')
@@ -91,11 +46,26 @@ class SubpopulationAnalysisMixin:
                     'figure_data': result.figure_data,
                     **result.details
                 })
-        return pd.DataFrame(results)
+                
+        # Create DataFrame from results
+        results_df = pd.DataFrame(results)
+        
+        # Return a MetricResult object with the DataFrame in details
+        return MetricResult(
+            name=f"{self.__class__.__name__}ByGroup",
+            details={
+                'group_type': group_type,
+                'group_name': group_name,
+                'n_groups': len(results)
+            },
+            figure_data={
+                'results_df': results_df
+            }
+        )
 
     # User-friendly wrapper methods
     def compute_over_time(self, y_true: np.ndarray, y_pred: np.ndarray, 
-                     time_index: np.ndarray, freq: str = 'Y') -> pd.DataFrame:
+                     time_index: np.ndarray, freq: str = 'Y') -> MetricResult:
         """
         Compute metric over time periods.
         
@@ -105,6 +75,11 @@ class SubpopulationAnalysisMixin:
             Dates or time periods for each observation
         freq : str
             Frequency for aggregation ('M'=monthly, 'Q'=quarterly, 'Y'=yearly)
+        
+        Returns
+        -------
+        MetricResult
+            Metric result object containing the group analysis results
         """
         if freq not in ['M', 'Q', 'Y']:
             raise ValueError("Frequency must be one of: 'M', 'Q', 'Y'")
@@ -124,7 +99,7 @@ class SubpopulationAnalysisMixin:
         )
 
     def compute_by_segment(self, y_true: np.ndarray, y_pred: np.ndarray,
-                          segments: np.ndarray, segment_labels: Dict = None) -> pd.DataFrame:
+                          segments: np.ndarray, segment_labels: Dict = None) -> MetricResult:
         """
         Compute metric for different segments.
         
@@ -134,6 +109,11 @@ class SubpopulationAnalysisMixin:
             Segment identifier for each observation
         segment_labels : dict, optional
             Mapping of segment IDs to display labels
+            
+        Returns
+        -------
+        MetricResult
+            Metric result object containing the group analysis results
         """
         return self._compute_by_group(
             y_true=y_true,
@@ -148,7 +128,7 @@ class SubpopulationAnalysisMixin:
 
     def compute_by_range(self, y_true: np.ndarray, y_pred: np.ndarray,
                         values: np.ndarray, bins: Union[int, list] = 10,
-                        labels: list = None) -> pd.DataFrame:
+                        labels: list = None) -> MetricResult:
         """
         Compute metric across value ranges (e.g., LTV ranges).
         
@@ -160,6 +140,11 @@ class SubpopulationAnalysisMixin:
             Number of bins or custom bin edges
         labels : list, optional
             Custom labels for bins
+            
+        Returns
+        -------
+        MetricResult
+            Metric result object containing the group analysis results
         """
         if isinstance(bins, int):
             group_index = pd.qcut(values, q=bins, labels=labels)
@@ -172,38 +157,6 @@ class SubpopulationAnalysisMixin:
             group_index=group_index,
             group_metadata={'type': 'range', 'name': 'value_range'}
         )
-
-    def _plot_group_results(self, results: pd.DataFrame, style: Optional[Dict] = None) -> Dict:
-        """
-        Plot metric results across groups.
-        
-        Parameters
-        ----------
-        results : pd.DataFrame
-            DataFrame returned by compute_over_time/compute_by_segment/compute_by_range
-        style : Dict, optional
-            Style configuration dictionary
-            
-        Returns
-        -------
-        Dict
-            Dictionary containing plot image data and dimensions
-        """
-        service = self._apply_style(style)
-        return service._plot_group_analysis(results, self.metric_type)
-    
-    def show_group_plot(self, results: pd.DataFrame, style: Optional[Dict] = None):
-        """Display the group analysis plot."""
-        service = self._apply_style(style)
-        plot_data = self._plot_group_results(results)
-        service.display_image(plot_data)
-    
-    def save_group_plot(self, results: pd.DataFrame, filepath: str, style: Optional[Dict] = None):
-        """Save the group analysis plot to file."""
-        service = self._apply_style(style)
-        plot_data = self._plot_group_results(results)
-        service.save_image(plot_data, filepath)
-
 
 class BaseMetric(ABC, SubpopulationAnalysisMixin):
     """
@@ -318,30 +271,23 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
             KeyError: If required keys ('y_true', 'y_pred') are not present in kwargs.
             Exception: Propagates exceptions from validation or computation steps.
         """
+        #validate inputs
+        if 'y_true' in kwargs and 'y_pred' in kwargs:
+            y_true = kwargs.get('y_true')
+            y_pred = kwargs.get('y_pred')
+            y_true, y_pred = self._validate_inputs(y_true, y_pred)
 
-        from tqdm import tqdm
-        steps = ["Validating inputs", "Computing metric", "Wrapping results"]
-        with tqdm(total = len(steps), desc = f"Computing {self.__class__.__name__}") as pbar:
-            #validate inputs
-            if 'y_true' in kwargs and 'y_pred' in kwargs:
-                y_true = kwargs.get('y_true')
-                y_pred = kwargs.get('y_pred')
-                y_true, y_pred = self._validate_inputs(y_true, y_pred)
-                pbar.update(1)
+            #compute metric
+            result = self._compute_raw(y_true = y_true, y_pred = y_pred) #note it's always a MetricResult object
 
-                #compute metric
-                result = self._compute_raw(y_true = y_true, y_pred = y_pred) #note it's always a MetricResult object
-                pbar.update(1)
+        #apply threshold if exists
+        if result.value is not None and result.threshold is None:
+            threshold = self.metric_config.get('threshold')
+            if threshold is not None:
+                result.threshold = threshold
+                result.passed = result.value >= threshold
 
-            #apply threshold if exists
-            if result.value is not None and result.threshold is None:
-                threshold = self.metric_config.get('threshold')
-                if threshold is not None:
-                    result.threshold = threshold
-                    result.passed = result.value >= threshold
-
-            self.result = result
-            pbar.update(1)
+        self.result = result
         return self.result
     
     @staticmethod
@@ -381,29 +327,70 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
             service.set_style(self._style)
         return service
     
-    def show_plot(self, figure_data: Dict, style: Optional[Dict] = None):
+    def show_plot(self, results: Optional[Union[MetricResult, Dict]] = None, style: Optional[Dict] = None):
         """
-        Show the plot with the given figure data and style.
-        """
-        service = self._apply_style(style)
-        plot_data = service.plot(figure_data, plot_type=self.metric_type)
-        service.display_image(plot_data)
-
-    def save_plot(self, figure_data: Dict, filepath: str, style: Optional[Dict] = None):
-        """
-        Save the plot to disk if needed.
+        Show the plot with the given results and style.
+        
+        This is the main entry point for plotting in CRMStudio.
         
         Parameters
         ----------
-        figure_data : Dict
-            Dictionary containing plot data
-        filepath : str
-            Path where to save the plot
+        results : MetricResult or Dict, optional
+            The metric results to plot. If None, uses self.result
         style : Dict, optional
             Style configuration to use
         """
+        # If no results provided, use the stored result
+        if results is None:
+            if self.result is None:
+                raise ValueError("No results to plot. Run compute() first or provide results.")
+            results = self.result
+        
+        # Convert dictionary to MetricResult if needed
+        if isinstance(results, dict) and not isinstance(results, MetricResult):
+            results = MetricResult(name=self.__class__.__name__, figure_data=results)
+        
+        # Apply style to the plotting service
         service = self._apply_style(style)
-        plot_data = service.plot(figure_data, plot_type=self.metric_type)
+        
+        # Let the plotting service handle the appropriate type of plot
+        plot_data = service.plot(results, plot_type=self.metric_type)
+        
+        # Display the image
+        service.display_image(plot_data)
+
+    def save_plot(self, filepath: str, results: Optional[Union[MetricResult, Dict]] = None, style: Optional[Dict] = None):
+        """
+        Save the plot to disk.
+        
+        This is the main entry point for saving plots in CRMStudio.
+        
+        Parameters
+        ----------
+        filepath : str
+            Path where to save the plot
+        results : MetricResult or Dict, optional
+            The metric results to plot. If None, uses self.result
+        style : Dict, optional
+            Style configuration to use
+        """
+        # If no results provided, use the stored result
+        if results is None:
+            if self.result is None:
+                raise ValueError("No results to plot. Run compute() first or provide results.")
+            results = self.result
+        
+        # Convert dictionary to MetricResult if needed
+        if isinstance(results, dict) and not isinstance(results, MetricResult):
+            results = MetricResult(name=self.__class__.__name__, figure_data=results)
+        
+        # Apply style to the plotting service
+        service = self._apply_style(style)
+        
+        # Let the plotting service handle the appropriate type of plot
+        plot_data = service.plot(results, plot_type=self.metric_type)
+        
+        # Save the image
         service.save_image(plot_data, filepath)
 
     @property

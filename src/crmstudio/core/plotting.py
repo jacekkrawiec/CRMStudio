@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import base64
 from io import BytesIO
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple, Union
 import pandas as pd
+
+from .data_classes import MetricResult
 
 class PlottingService:
     """
@@ -35,151 +37,8 @@ class PlottingService:
     def set_style(self, style: Dict):
         """Update the plotting style."""
         self.style = style
-    
-    def _convert_to_image(self, fig: plt.Figure) -> Dict[str, Any]:
-        """Convert a matplotlib figure to a dictionary with image data."""
-        buf = BytesIO()
-        fig.savefig(buf, format='png', bbox_inches='tight')
-        buf.seek(0)
-        image_base64 = base64.b64encode(buf.read()).decode('utf-8')
-        plt.close(fig)  # Clean up the figure
-        
-        return {
-            "image_base64": image_base64,
-            "width": fig.get_size_inches()[0] * fig.dpi,
-            "height": fig.get_size_inches()[1] * fig.dpi
-        }
-    
-    def plot(self, figure_data: Dict, plot_type: str = None) -> Dict[str, Any]:
-        """
-        Plot a figure based on figure_data and the specified plot type.
-        
-        Parameters
-        ----------
-        figure_data : Dict
-            Dictionary containing data for visualization
-        plot_type : str, optional
-            The type of plot ('curve' or 'distribution'). If None, will be detected from data.
-            
-        Returns
-        -------
-        Dict
-            Dictionary with image data
-        """
-        # Create figure with consistent size
-        fig_style = self.style.get('figure', {})
-        fig_size = fig_style.get('size', [8, 5])
-        fig, ax = plt.subplots(figsize=fig_size)
-        
-        # Route to appropriate plotting function based on plot_type
-        if plot_type == 'curve' or (plot_type is None and all(k in figure_data for k in ['x', 'y'])):
-            self._plot_curve_data(ax, figure_data)
-        else:  # distribution
-            self._plot_distribution_data(ax, figure_data)
-        
-        # Apply common styling and settings
-        self._apply_common_styling(ax, figure_data)
-        
-        # Return the image data
-        return self._convert_to_image(fig)
-    
-    def _plot_curve_data(self, ax, figure_data: Dict):
-        """Plot curve data on the given axis."""
-        # Extract styling options
-        colors = self.style.get('colors', {})
-        fig_style = self.style.get('figure', {})
-        line_style = self.style.get('lines', {})
-        
-        # Plot main curve
-        ax.plot(
-            figure_data['x'], 
-            figure_data['y'],
-            color=colors.get('main', '#1f77b4'),
-            alpha=line_style.get('main_alpha', 0.8),
-            linewidth=line_style.get('main_width', 2),
-            label=figure_data.get('label', 'Model')
-        )
-        
-        # Add reference line if needed
-        if figure_data.get('show_diagonal', True):
-            ax.plot(
-                [0, 1], 
-                [0, 1],
-                color=colors.get('reference', '#ff7f0e'),
-                linestyle='--',
-                alpha=line_style.get('reference_alpha', 0.5),
-                linewidth=line_style.get('reference_width', 1.5),
-                label=figure_data.get('reference_label', 'Random')
-            )
-        
-        # Add labels
-        ax.set_xlabel(figure_data.get('xlabel', 'Score'), fontsize=fig_style.get('label_fontsize', 10))
-        ax.set_ylabel(figure_data.get('ylabel', 'Performance'), fontsize=fig_style.get('label_fontsize', 10))
-        ax.set_title(figure_data.get('title', 'Model Performance'), fontsize=fig_style.get('title_fontsize', 12))
-        
-        # Configure legend
-        ax.legend(fontsize=self.style.get('legend', {}).get('fontsize', 10))
-    
-    def _plot_distribution_data(self, ax, figure_data: Dict):
-        """Plot distribution data on the given axis."""
-        # Extract styling options
-        colors = self.style.get('colors', {})
-        fig_style = self.style.get('figure', {})
-        
-        # Plot defaulted/non-defaulted distributions if available
-        if all(k in figure_data for k in ['x_def', 'y_def', 'x_ndef', 'y_ndef']):
-            bin_edges = figure_data.get('bin_edges', None)
-            if bin_edges is None:
-                # Create reasonable bins if not provided
-                all_x = np.concatenate([figure_data['x_def'], figure_data['x_ndef']])
-                bin_edges = np.linspace(np.min(all_x), np.max(all_x), 20)
-            
-            # Plot histograms
-            ax.hist(
-                figure_data['x_def'], 
-                bins=bin_edges, 
-                weights=figure_data['y_def'],
-                alpha=0.5, 
-                color=colors.get('defaulted', 'red'),
-                label='Defaulted'
-            )
-            ax.hist(
-                figure_data['x_ndef'], 
-                bins=bin_edges, 
-                weights=figure_data['y_ndef'],
-                alpha=0.5, 
-                color=colors.get('non_defaulted', 'green'),
-                label='Non-defaulted'
-            )
-        # Plot standard distribution curve if available
-        elif all(k in figure_data for k in ['x', 'y']):
-            ax.plot(
-                figure_data['x'], 
-                figure_data['y'],
-                color=colors.get('main', '#1f77b4'),
-                label=figure_data.get('label', 'Distribution')
-            )
-            
-        # Add labels
-        ax.set_xlabel(figure_data.get('xlabel', 'Value'), fontsize=fig_style.get('label_fontsize', 10))
-        ax.set_ylabel(figure_data.get('ylabel', 'Frequency'), fontsize=fig_style.get('label_fontsize', 10))
-        ax.set_title(figure_data.get('title', 'Distribution'), fontsize=fig_style.get('title_fontsize', 12))
-        
-        # Add metric value if present
-        if 'value' in figure_data:
-            ax.text(
-                0.95, 
-                0.95, 
-                f"Value: {figure_data['value']:.3f}",
-                transform=ax.transAxes,
-                horizontalalignment='right',
-                verticalalignment='top'
-            )
-        
-        # Configure legend
-        ax.legend(fontsize=self.style.get('legend', {}).get('fontsize', 10))
-    
-    def _apply_common_styling(self, ax, figure_data: Dict = None):
+
+    def _apply_common_styling(self, ax):
         """Apply common styling elements to an axis."""
         fig_style = self.style.get('figure', {})
         grid_style = self.style.get('grid', {})
@@ -195,14 +54,173 @@ class PlottingService:
         
         # Set tick label sizes
         ax.tick_params(labelsize=fig_style.get('tick_fontsize', 8))
-        
-        # Set axis limits if provided
-        if figure_data:
-            if 'xlim' in figure_data:
-                ax.set_xlim(figure_data['xlim'])
-            if 'ylim' in figure_data:
-                ax.set_ylim(figure_data['ylim'])
+
     
+    def _convert_to_image(self, fig: plt.Figure) -> Dict[str, Any]:
+        """Convert a matplotlib figure to a dictionary with image data."""
+        buf = BytesIO()
+        fig.savefig(buf, format='png', bbox_inches='tight')
+        buf.seek(0)
+        image_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close(fig)  # Clean up the figure
+        
+        return {
+            "image_base64": image_base64,
+            "width": fig.get_size_inches()[0] * fig.dpi,
+            "height": fig.get_size_inches()[1] * fig.dpi
+        }
+    
+    def plot(self, metric_result: MetricResult, plot_type: str = None) -> Dict[str, Any]:
+        """
+        Plot a figure based on metric_result and the specified plot type.
+        
+        This is the main entry point for all plotting in the PlottingService.
+        It handles all metrics, always treating results as a collection of data series
+        where a single curve is just a special case with one item.
+        
+        Parameters
+        ----------
+        metric_result : MetricResult
+            MetricResult object containing data for visualization
+        plot_type : str, optional
+            The type of plot ('curve' or 'distribution'). If None, will be detected from data.
+            
+        Returns
+        -------
+        Dict
+            Dictionary with image data
+        """
+        if metric_result is None:
+            raise ValueError("No metric result provided for plotting.")
+        
+        if metric_result.has_figure():
+            figure_data = metric_result.figure_data
+            datasets = self._prepare_datasets(figure_data)
+            # Determine if we have scalar metrics or plot metrics
+            # Check if all values in the datasets are non-dictionary values
+            is_scalar_collection = True
+            for dataset in datasets:
+                for key, value in dataset.items():
+                    if isinstance(value, dict):
+                        is_scalar_collection = False
+                        break
+                if not is_scalar_collection:
+                    break
+            
+            if is_scalar_collection:
+                fig, ax = self._plot_scalar_collection(datasets)
+            elif plot_type == 'curve':
+                # attempt plotting multiple curves at single chart
+                fig, ax = self._plot_curve(datasets)
+            elif plot_type == 'distribution':
+                # create as many subplots as there are elements in datasets list
+                fig, ax = self._plot_distribution(datasets)
+            else:
+                raise ValueError(f"Unknown plot type: {plot_type}")
+        else:
+            #scalar method was called, we will plot a bar chart with one bar only to avoid unneccessert error raising.
+            fig, ax = self._plot_scalar_collection(metric_result)
+
+        self._apply_common_styling(ax)
+        image_data = self._convert_to_image(fig)
+
+        # Return the image data
+        return image_data
+
+    def _plot_scalar_collection(self, results: Union[MetricResult, List[Dict[str, Any]]]) -> Tuple[plt.Figure, plt.Axes]:
+        """Plot a collection of scalar metrics as a bar chart."""
+        fig, ax = plt.subplots()
+        
+        if isinstance(results, MetricResult):
+            # Single metric result
+            ax.bar("Whole sample", results.value)
+        else:
+            # List of dictionaries
+            labels = []
+            values = []
+            
+            for dataset in results:
+                for label, value in dataset.items():
+                    labels.append(label)
+                    values.append(value if not isinstance(value, dict) else value.get('value', 0))
+            
+            # Create the bar chart
+            ax.bar(labels, values)
+            
+            # Adjust layout for readability if many labels
+            if len(labels) > 3:
+                plt.xticks(rotation=45, ha='right')
+                fig.tight_layout()
+                
+        return fig, ax
+
+    def _prepare_datasets(self, figure_data: Dict) -> List[Dict[str, Any]]:
+        """Prepare datasets for plotting from the figure data."""
+        datasets = []
+        if 'results_df' in figure_data:
+            # Collect all data in results_df into datasets list
+            results_df = figure_data['results_df']
+            if 'group' not in results_df or 'figure_data' not in results_df:
+                raise ValueError("Invalid results_df format.")
+            for label, row in zip(results_df['group'], results_df['figure_data']):
+                if row is None:
+                    row = results_df.loc[results_df['group'] == label, 'value'].values[0]
+                datasets.append({label: row})
+        else:
+            # If no results_df, we treat it as a single dataset
+            # Collect all data, not only name, x and y
+            datasets.append({"Full sample":figure_data})
+        return datasets
+
+    def _plot_curve(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """Plot a curve based on the provided datasets."""
+        fig, ax = plt.subplots()
+        
+        # Plot the diagonal reference line
+        ax.plot([0, 1], [0, 1], 'k--', alpha=0.5, label='Random')
+        
+        # Plot each dataset
+        for dataset in datasets:
+            for label, data in dataset.items():
+                ax.plot(data['x'], data['y'], label=label)
+        
+        ax.legend()
+        return fig, ax
+
+    def _plot_distribution(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """Plot a distribution based on the provided datasets.
+        Here we have following options:
+        - Histogram for ScoreHistogram
+        - 2 curves for KSDistPlot
+        - 1 curve for PDGain and PDLift
+        """
+        # Number of subplots:
+        n_subplots = len(datasets)
+        fig, axs = plt.subplots(n_subplots, figsize=(8, 4 * n_subplots))
+        if n_subplots == 1:
+            axs = [axs]  # Ensure axs is always a list
+
+        for ax, dataset in zip(axs, datasets):
+            for label, data in dataset.items():
+                ax.set_title(label)
+                # Only histogram data contain x_def and y_def
+                if 'x_def' in data and 'y_def' in data:
+                    ax.hist(x = data['x_def'], bins = data['bin_edges'], weights=data['y_def'], label="Defaulted", alpha=0.5)
+                    ax.hist(x = data['x_ndef'], bins = data['bin_edges'], weights=data['y_ndef'], label="Non-defaulted", alpha=0.5)
+                # All other metrics return x, y, x_ref and y_ref, for them we plot simple curve 
+                else:
+                    if 'actual_label' in data:
+                        main_label = data['actual_label']
+                        ref_label = data.get('ref_label', 'CDF nondefaulted')
+                    else:
+                        main_label = "Model"
+                        ref_label = "Random"
+                    ax.plot(data['x'], data['y'], label=main_label)
+                    if 'x_ref' in data and 'y_ref' in data:
+                        ax.plot(data['x_ref'], data['y_ref'], label=ref_label, linestyle='--')
+                ax.legend()
+        return fig, ax
+
     def display_image(self, image_data: Dict):
         """Display an image in the current context."""
         img_data = base64.b64decode(image_data["image_base64"])
@@ -216,81 +234,3 @@ class PlottingService:
         img_data = base64.b64decode(image_data["image_base64"])
         with open(filepath, "wb") as f:
             f.write(img_data)
-            
-    def _plot_group_analysis(self, results: pd.DataFrame, plot_type: str = 'curve') -> Dict[str, Any]:
-        """
-        Plot metric results across groups.
-        
-        Parameters
-        ----------
-        results : pd.DataFrame
-            DataFrame containing group results
-        plot_type : str
-            Type of metric plot ('curve' or 'distribution')
-            
-        Returns
-        -------
-        Dict
-            Dictionary with image data
-        """
-        # Check if figure_data is available for plotting multiple curves/distributions
-        has_figure_data = 'figure_data' in results.columns and not results['figure_data'].isna().all()
-        
-        # Create figure
-        fig_style = self.style.get('figure', {})
-        fig_size = fig_style.get('size', [10, 6])
-        fig, ax = plt.subplots(figsize=fig_size)
-        
-        if has_figure_data and plot_type == 'curve':
-            # Plot multiple curves on the same axes
-            for _, row in results.iterrows():
-                group = row['group']
-                figure_data = row['figure_data']
-                if figure_data and 'x' in figure_data and 'y' in figure_data:
-                    ax.plot(figure_data['x'], figure_data['y'], label=f"{group}")
-            
-            # Add labels from first figure_data
-            first_figure = next((row['figure_data'] for _, row in results.iterrows() 
-                               if row['figure_data'] and 'x' in row['figure_data']), {})
-            
-            ax.set_xlabel(first_figure.get('xlabel', 'X'), fontsize=fig_style.get('label_fontsize', 10))
-            ax.set_ylabel(first_figure.get('ylabel', 'Y'), fontsize=fig_style.get('label_fontsize', 10))
-            
-        elif has_figure_data and plot_type == 'distribution':
-            # For distributions, we'll show a simple value plot and leave the detailed
-            # distribution visualization for individual plots
-            ax.plot(results['group'], results['value'], marker='o')
-            ax.set_xlabel(results['group_name'].iloc[0].title(), fontsize=fig_style.get('label_fontsize', 10))
-            ax.set_ylabel('Metric Value', fontsize=fig_style.get('label_fontsize', 10))
-            
-            if 'group_type' in results.columns and results['group_type'].iloc[0] == 'time':
-                plt.xticks(rotation=45)
-                
-        else:
-            # Plot simple metric values with markers
-            if 'group_type' in results.columns and results['group_type'].iloc[0] == 'time':
-                # Time series plot
-                ax.plot(results['group'], results['value'], marker='o')
-                plt.xticks(rotation=45)
-                ax.set_xlabel('Period', fontsize=fig_style.get('label_fontsize', 10))
-            else:
-                # Bar plot for segments
-                x = range(len(results))
-                ax.bar(x, results['value'], alpha=0.7)
-                plt.xticks(x, results['group'], rotation=45)
-                ax.set_xlabel(results['group_name'].iloc[0].title(), fontsize=fig_style.get('label_fontsize', 10))
-                
-            ax.set_ylabel('Metric Value', fontsize=fig_style.get('label_fontsize', 10))
-        
-        # Apply common styling
-        self._apply_common_styling(ax)
-        
-        # Add legend if we have multiple curves
-        if has_figure_data and plot_type == 'curve':
-            ax.legend()
-            
-        # Set title
-        ax.set_title(f"Group Analysis: {results['group_name'].iloc[0].title()}", 
-                    fontsize=fig_style.get('title_fontsize', 12))
-        
-        return self._convert_to_image(fig)
