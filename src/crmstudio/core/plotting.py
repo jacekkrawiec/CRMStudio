@@ -174,20 +174,20 @@ class PlottingService:
         
         with self._plotting_context():
             if metric_result.has_figure():
-                figure_data = metric_result.figure_data
-                datasets = self._prepare_datasets(figure_data)
-                # Determine if we have scalar metrics or plot metrics
-                # Check if all values in the datasets are non-dictionary values
-                is_scalar_collection = True
-                for dataset in datasets:
-                    for key, value in dataset.items():
-                        if isinstance(value, dict):
-                            is_scalar_collection = False
-                            break
-                    if not is_scalar_collection:
-                        break
+                # Get standardized datasets directly from MetricResult
+                datasets = metric_result.prepare_for_plotting()
                 
-                if is_scalar_collection:
+                # Determine plot type based on data if not specified
+                if plot_type is None:
+                    if metric_result.is_scalar_collection():
+                        plot_type = 'scalar'
+                    elif metric_result.is_curve_data():
+                        plot_type = 'curve'
+                    else:
+                        plot_type = 'distribution'
+                
+                # Route to appropriate plotting function based on plot_type
+                if plot_type == 'scalar' or metric_result.is_scalar_collection():
                     fig, ax = self._plot_scalar_collection(datasets)
                 elif plot_type == 'curve':
                     # attempt plotting multiple curves at single chart
@@ -198,7 +198,7 @@ class PlottingService:
                 else:
                     raise ValueError(f"Unknown plot type: {plot_type}")
             else:
-                #scalar method was called, we will plot a bar chart with one bar only to avoid unneccessert error raising.
+                # scalar method was called, we will plot a bar chart with one bar only
                 fig, ax = self._plot_scalar_collection(metric_result)
     
             self._apply_common_styling(ax)
@@ -211,10 +211,20 @@ class PlottingService:
         """Plot a collection of scalar metrics as a bar chart."""
         with self._figure_context() as (fig, ax):
             if isinstance(results, MetricResult):
-                # Single metric result
-                ax.bar("Whole sample", results.value)
+                # Get standardized datasets directly from MetricResult
+                datasets = results.prepare_for_plotting()
+                labels = []
+                values = []
+                
+                for dataset in datasets:
+                    for label, value in dataset.items():
+                        labels.append(label)
+                        values.append(value if not isinstance(value, dict) else value.get('value', 0))
+                
+                # Create the bar chart
+                ax.bar(labels, values)
             else:
-                # List of dictionaries
+                # List of dictionaries (already prepared datasets)
                 labels = []
                 values = []
                 
@@ -229,51 +239,13 @@ class PlottingService:
                 
                 # Create the bar chart
                 ax.bar(labels, values)
-                
-                # Adjust layout for readability if many labels
-                if len(labels) > 3:
-                    plt.xticks(rotation=45, ha='right')
-                    fig.tight_layout()
+            
+            # Adjust layout for readability if many labels
+            if len(labels) > 3:
+                plt.xticks(rotation=45, ha='right')
+                fig.tight_layout()
                     
         return fig, ax
-
-    def _prepare_datasets(self, figure_data: Dict) -> List[Dict[str, Any]]:
-        """Prepare datasets for plotting from the figure data."""
-        datasets = []
-        if 'results_df' in figure_data:
-            # Collect all data in results_df into datasets list
-            results_df = figure_data['results_df']
-            
-            # Verify that the required columns exist
-            if 'group' not in results_df.columns:
-                raise ValueError("results_df must contain a 'group' column")
-            
-            if 'figure_data' not in results_df.columns and 'value' not in results_df.columns:
-                raise ValueError("results_df must contain either 'figure_data' or 'value' column")
-            
-            # Handle time-based indices by converting them to strings
-            has_figure_data = 'figure_data' in results_df.columns
-            
-            for i, row in results_df.iterrows():
-                label = row['group']
-                # Convert Period or Timestamp objects to strings
-                if isinstance(label, (pd.Period, pd.Timestamp)):
-                    label = str(label)
-                
-                if has_figure_data:
-                    data = row['figure_data']
-                    if data is None and 'value' in row:
-                        data = row['value']
-                else:
-                    data = row['value']
-                
-                datasets.append({label: data})
-        else:
-            # If no results_df, we treat it as a single dataset
-            # Collect all data, not only name, x and y
-            datasets.append({"Full sample": figure_data})
-        
-        return datasets
 
     def _plot_curve(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
         """Plot a curve based on the provided datasets."""

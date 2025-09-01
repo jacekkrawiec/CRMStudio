@@ -19,8 +19,6 @@ from crmstudio import core, metrics, utils
 # Full reload sequence - order matters!
 # First reload lower level modules, then the modules that depend on them
 importlib.reload(core.data_classes)
-importlib.reload(core.config_loader)
-importlib.reload(utils.helpers)
 importlib.reload(core.plotting)
 importlib.reload(core.base)
 importlib.reload(core)
@@ -66,28 +64,7 @@ def generate_input(n_samples=10000):
     })
     return df
 
-print("Generating test data...")
 df = generate_input()
-
-#Testing AUC with threshold
-
-config = {"models": {"test_model": {"metrics": [{
-                    "name": "auc",
-                    "threshold": 0.8
-                }
-            ]
-        }
-    }
-}
-
-
-auc = metrics.pd_metrics.AUC("test_model", config = config)
-auc.config
-result = auc.compute(y_true=df['y_true'], y_pred=df['y_pred'])
-result.passed
-
-assert result.threshold == 0.8
-assert result.passed is True  # 1.0 >= 0.8
 
 # Example 1: Individual metric with show_plot
 print("\nExample 1: Individual metric with show_plot")
@@ -96,9 +73,6 @@ result = roc.compute(y_true=df['y_true'], y_pred=df['y_pred'])
 print(f"ROC AUC: {result.value:.4f}")
 # Calling show_plot with no arguments uses stored result
 roc.show_plot(result)
-
-
-result.figure_data
 
 
 # Example 2: Distribution metric with show_plot and result passed
