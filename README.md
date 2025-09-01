@@ -2,7 +2,7 @@
 
 CRMStudio is a Python package designed for monitoring IRB models (PD, LGD, EAD) locally within your bank infrastructure. It helps you run monitoring checks, evaluate metrics, trigger alerts, and generate reports — all **without sharing sensitive data externally**.
 
-Attention: CRMStudio is in alpha stage, not everything is implemented yet. It is not yet available via pip, etc. For now it can be used for PD's discriminaotry power assessment. More features will be available soon.
+Attention: CRMStudio is in alpha stage, not everything is implemented yet. It is not yet available via pip, etc. For now it can be used for PD model evaluation including discrimination and calibration metrics. More features will be available soon.
 ---
 
 ## Quickstart
@@ -22,7 +22,14 @@ Create a YAML config (e.g., config/monitoring_config.yaml) specifying models, me
 ```yaml
 models:
   pd_model:
-    metrics: [psi, gini, ks]
+    metrics: 
+      - name: AUC
+        params:
+          threshold: 0.75
+      - name: HosmerLemeshow
+        params:
+          alpha: 0.05
+          n_bins: 10
     thresholds:
       psi: 0.25
       gini: 0.6
@@ -56,9 +63,59 @@ ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
 
 ## Features
 
-- **Data Quality Checks**: Validate data integrity with various checks.
-- **Monitoring Checks**: Continuously monitor model performance and trigger alerts.
-- **Report Generation**: Generate customizable reports for regulatory compliance and internal review.
+### PD Model Metrics
+
+#### Discrimination Power
+- ROC Curve and AUC (Area Under the Curve)
+- CAP Curve and Accuracy Ratio (AR)
+- Kolmogorov-Smirnov (KS) statistic and plot
+- Pietra Index (maximum separation)
+- Gini coefficient with confidence intervals
+- Score distributions (defaulted vs. non-defaulted)
+- Lift and gain charts
+- Information Value (IV)
+- CIER (Conditional Information Entropy Ratio)
+- AUC delta test for performance stability (ECB method)
+
+#### Calibration Metrics
+- Hosmer-Lemeshow test
+- Calibration curves (reliability diagrams)
+- Brier score and Brier skill score
+- Expected Calibration Error (ECE)
+- PD Calibration Stats (comprehensive calibration assessment)
+
+### Coming Soon
+- Stability metrics (PSI, CSI)
+- LGD and EAD/CCF metrics
+- Report generation
+- Monitoring pipeline
+
+## Example
+
+```python
+from crmstudio.metrics.pd.calibration import HosmerLemeshow
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+
+# Create synthetic data
+X, y = make_classification(n_samples=1000, weights=[0.9, 0.1], random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+
+# Train model
+model = LogisticRegression().fit(X_train, y_train)
+y_pred = model.predict_proba(X_test)[:, 1]
+
+# Calculate Hosmer-Lemeshow test
+hl = HosmerLemeshow(model_name="example_model")
+result = hl.compute(y_true=y_test, y_pred=y_pred)
+
+# Display results
+print(f"p-value: {result.value:.4f} ({'Passed' if result.passed else 'Failed'})")
+
+# Plot the calibration chart
+hl.show_plot()
+```
 
 ## Contributing
 

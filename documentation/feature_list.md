@@ -20,12 +20,46 @@
 
 ## 3. Model Performance Metrics
 
-- [ ] Discriminatory power: KS statistic, Gini coefficient, AUC
-- [ ] Calibration metrics: Brier score, calibration plots
-- [ ] Population Stability Index (PSI) for feature & score drift
-- [ ] Feature-level information value (IV)
-- [ ] Confusion matrix generation
-- [ ] Benchmark comparison (current vs. previous runs)
+### 3.1 PD Model Metrics
+
+#### 3.1.1 Discriminatory Power
+- [x] ROC Curve and AUC (Area Under the Curve)
+- [x] CAP Curve and Accuracy Ratio (AR)
+- [x] Kolmogorov-Smirnov (KS) statistic
+- [x] Pietra Index (maximum separation)
+- [x] Gini coefficient with confidence intervals
+- [x] Score distributions (defaulted vs. non-defaulted)
+- [x] Lift and gain charts
+- [x] Information Value (IV)
+- [x] CIER (Conditional Information Entropy Ratio)
+- [x] AUC delta test for performance stability (ECB method)
+
+#### 3.1.2 Calibration Metrics
+- [x] Hosmer-Lemeshow test
+- [x] Calibration curves (reliability diagrams)
+- [x] Brier score and Brier skill score
+- [x] Expected Calibration Error (ECE)
+- [x] PD Calibration Stats (comprehensive calibration assessment)
+
+#### 3.1.3 Stability Metrics
+- [ ] Population Stability Index (PSI)
+- [ ] Characteristic Stability Index (CSI)
+- [ ] Distribution drift detection
+- [ ] PD model performance tracking over time
+- [ ] Simple out-of-time validation framework
+
+### 3.2 LGD Model Metrics (Planned)
+- [ ] MSE, MAE, RMSE for LGD predictions
+- [ ] R-squared and adjusted R-squared
+- [ ] Calibration assessment (predicted vs. observed LGD)
+- [ ] ROC AUC for binary component (zero vs. non-zero LGD)
+- [ ] Segmented performance metrics (by collateral type, exposure size, etc.)
+
+### 3.3 EAD/CCF Model Metrics (Planned)
+- [ ] Conversion Factor accuracy metrics
+- [ ] EAD over/underestimation analysis
+- [ ] Segmented performance by product type and facility characteristics
+- [ ] Stability analysis for conversion factors
 
 ## 4. Model Monitoring & Validation
 

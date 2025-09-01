@@ -4,7 +4,7 @@ Unit tests for PD metrics in CRMStudio.
 
 import pytest
 import numpy as np
-from crmstudio.metrics.pd_metrics import (
+from crmstudio.metrics.pd.discrimination import (
     AUC, ROCCurve, PietraIndex, KSStat, Gini, CAPCurve, KSDistPlot, ScoreHistogram
 )
 from crmstudio.core.data_classes import MetricResult

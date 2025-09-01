@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import os
 import tempfile
-from crmstudio.metrics.pd_metrics import AUC, ROCCurve, Gini
+from crmstudio.metrics.pd.discrimination import AUC, ROCCurve, Gini
 from crmstudio.core.plotting import PlottingService
 
 class TestMetricsPipeline:

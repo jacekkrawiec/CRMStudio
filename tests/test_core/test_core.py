@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from crmstudio.core.data_classes import MetricResult
 from crmstudio.core.plotting import PlottingService
-from crmstudio.metrics.pd_metrics import AUC, ROCCurve
+from crmstudio.metrics.pd.discrimination import AUC, ROCCurve
 
 class TestMetricResult:
     """Tests for MetricResult data class."""

@@ -221,10 +221,11 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
         y_pred = np.asarray(y_pred)
         if y_true.shape != y_pred.shape:
             raise ValueError("y_true and y_pred must have the same shape.")
-        if not np.all(np.isfinite(y_pred)):
-            raise ValueError("y_pred contains non-finite values, e.g. NaNs or INF.")
-        if not np.all(np.isin(y_true, [0,1])): # I suppose at some point we'll need to support multi-class/continuous; let's leave it for now
-            raise ValueError("y_true must be binary (0/1) for discrimination metrics.")
+        # below commented out as it assumes only PD/binary use
+        # if not np.all(np.isfinite(y_pred)):
+        #     raise ValueError("y_pred contains non-finite values, e.g. NaNs or INF.")
+        # if not np.all(np.isin(y_true, [0,1])): # I suppose at some point we'll need to support multi-class/continuous; let's leave it for now
+        #     raise ValueError("y_true must be binary (0/1) for discrimination metrics.")
         return y_true, y_pred
         
     @property
@@ -278,7 +279,9 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
             y_true, y_pred = self._validate_inputs(y_true, y_pred)
 
             #compute metric
-            result = self._compute_raw(y_true = y_true, y_pred = y_pred) #note it's always a MetricResult object
+            # Remove 'y_true' and 'y_pred' from kwargs before passing to _compute_raw
+            compute_kwargs = {k: v for k, v in kwargs.items() if k not in ('y_true', 'y_pred')}
+            result = self._compute_raw(y_true=y_true, y_pred=y_pred, **compute_kwargs)  # note it's always a MetricResult object
 
         #apply threshold if exists
         if result.value is not None and result.threshold is None:

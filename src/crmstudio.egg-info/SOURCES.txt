@@ -23,12 +23,14 @@ src/crmstudio/data/loader.py
 src/crmstudio/metrics/__init__.py
 src/crmstudio/metrics/common_metrics.py
 src/crmstudio/metrics/lgd_metrics.py
-src/crmstudio/metrics/pd_metrics.py
 src/crmstudio/metrics/stability_metrics.py
+src/crmstudio/metrics/pd/__init__.py
+src/crmstudio/metrics/pd/calibration.py
+src/crmstudio/metrics/pd/discrimination.py
+src/crmstudio/metrics/pd/stability.py
 src/crmstudio/monitoring/__init__.py
 src/crmstudio/monitoring/pipeline.py
 src/crmstudio/reports/__init__.py
 src/crmstudio/reports/generator.py
 src/crmstudio/utils/__init__.py
 src/crmstudio/utils/helpers.py
-tests/test_refactoring.py

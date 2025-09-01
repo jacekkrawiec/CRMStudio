@@ -1,5 +1,12 @@
+"""
+Discrimination metrics for probability of default (PD) models.
+
+This module provides metrics for assessing the discriminatory power of PD models,
+including ROC-AUC, Gini, KS statistic, and various visualization tools.
+"""
+
 import math
-from ..core.base import BaseMetric, MetricResult
+from ...core.base import BaseMetric, MetricResult
 import numpy as np
 from scipy import stats
 from sklearn.metrics import roc_auc_score, roc_curve
@@ -169,11 +176,12 @@ class AUCDelta(BaseMetric):
       
 
 class ROCCurve(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Generate ROC curve coordinates with AUC statistic.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         fpr, tpr, thresholds = roc_curve(y_true, y_pred)
         auc_score = roc_auc_score(y_true, y_pred)
@@ -191,11 +199,12 @@ class ROCCurve(BaseMetric):
             )
 
 class PietraIndex(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Pietra index (maximum deviation of ROC curve from diagonal).
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         if y_pred is not None and y_true is not None:
             fpr, tpr, _ = roc_curve(y_true, y_pred)
@@ -212,11 +221,12 @@ class PietraIndex(BaseMetric):
         )
 
 class KSStat(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kolmogorov-Smirnov statistic.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true = None, y_pred = None, **kwargs):
         if y_pred is not None and y_true is not None:
             fpr, tpr, _ = roc_curve(y_true, y_pred)
@@ -233,11 +243,12 @@ class KSStat(BaseMetric):
         )
 
 class Gini(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Gini coefficient (2*AUC - 1).
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         auc = roc_auc_score(y_true, y_pred)
         gini = 2 * auc - 1
@@ -251,11 +262,12 @@ class Gini(BaseMetric):
         )
 
 class GiniCI(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Calculate Gini coefficient with confidence intervals.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         confidence = self._get_param("confidence", default = 0.95)
         auc = roc_auc_score(y_true, y_pred)
@@ -284,8 +296,6 @@ class GiniCI(BaseMetric):
 
 
 class CAPCurve(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
     """
     Generate Cumulative Accuracy Profile curve coordinates.
     
@@ -295,6 +305,9 @@ class CAPCurve(BaseMetric):
     2. Within each rating group, sorts by actual defaults (y_true)
     This ensures maximum discriminatory power within rating groups.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="curve", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         # Convert inputs to numpy arrays
         y_true = np.array(y_true)
@@ -333,8 +346,6 @@ class CAPCurve(BaseMetric):
         )
 
 class CIER(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Conditional Information Entropy Ratio (CIER).
     
@@ -343,6 +354,9 @@ class CIER(BaseMetric):
     CIER = 1 - H(Y|X) / H(Y)
     where H(Y|X) is conditional entropy and H(Y) is entropy of target variable.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         n_bins = self._get_param("n_bins", default = 10)
         # Calculate entropy of target variable H(Y)
@@ -379,11 +393,12 @@ class CIER(BaseMetric):
         )
 
 class KLDistance(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kullback-Leibler divergence between predicted and actual distributions.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         n_bins = self._get_param("n_bins", default = 10)
         hist_true, _ = np.histogram(y_true, bins=n_bins, density=True)
@@ -405,11 +420,12 @@ class KLDistance(BaseMetric):
         )
 
 class InformationValue(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Information Value (IV) for the model predictions.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         n_bins = self._get_param("n_bins", default = 10)
         
@@ -458,11 +474,12 @@ class InformationValue(BaseMetric):
         )
 
 class KendallsTau(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Kendall's Tau correlation coefficient.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         tau, _ = stats.kendalltau(y_true, y_pred)
         return MetricResult(
@@ -472,11 +489,12 @@ class KendallsTau(BaseMetric):
         )
 
 class SpearmansRho(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculate Spearman's rank correlation coefficient.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         rho, _ = stats.spearmanr(y_true, y_pred)
         return MetricResult(
@@ -486,12 +504,13 @@ class SpearmansRho(BaseMetric):
         )
 
 class KSDistPlot(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculates cumulative distribution function of defaulted and non-defaulted populations.
     Shows maximum separation point, i.e. KS statistic.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
@@ -535,12 +554,13 @@ class KSDistPlot(BaseMetric):
             )
 
 class ScoreHistogram(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Calculates 2 histograms of scores, one per each value of y_true,
     i.e. histogram of scores for defaulted and non-defaulted population.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         n_bins = self._get_param("n_bins", default=10)
         y_true = np.asarray(y_true)
@@ -577,8 +597,6 @@ class ScoreHistogram(BaseMetric):
         )
 
 class PDLiftPlot(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Implements Lift Plotting.
 
@@ -586,6 +604,9 @@ class PDLiftPlot(BaseMetric):
     computes the ratio of the observed default rate in that quantile to the overall default rate.
     The random model is a horizontal line at lift=1.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
@@ -635,8 +656,6 @@ class PDLiftPlot(BaseMetric):
         )
     
 class PDGainPlot(BaseMetric):
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
     """
     Implements Gain Plotting.
 
@@ -646,6 +665,9 @@ class PDGainPlot(BaseMetric):
     
     It looks really similar to CAP.
     """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="distribution", config=config, config_path=config_path, **kwargs)
+        
     def _compute_raw(self, y_true, y_pred, **kwargs):
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
