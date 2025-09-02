@@ -3,7 +3,7 @@ Probability of Default (PD) metrics for model validation.
 
 This package contains metrics for evaluating PD model performance, organized by:
 - discrimination.py: Metrics for assessing model's ability to distinguish between good and bad cases
-- calibration.py: Metrics for assessing accuracy of probability predictions
+- calibration.py: Metrics for assessing accuracy of probability predictions and heterogeneity testing
 - stability.py (future): Metrics for assessing model stability over time
 """
 
@@ -15,7 +15,8 @@ from .discrimination import (
 
 from .calibration import (
     HosmerLemeshow, CalibrationCurve, BrierScore, BinomialTest, 
-    NormalTest, JeffreysTest, ExpectedCalibrationError
+    NormalTest, JeffreysTest, ExpectedCalibrationError,
+    HeterogeneityTest, SubgroupCalibrationTest, RatingHeterogeneityTest
 )
 
 # Will be imported in the future when implemented
@@ -33,6 +34,9 @@ __all__ = [
     # Calibration metrics
     'HosmerLemeshow', 'CalibrationCurve', 'BrierScore', 'ExpectedCalibrationError',
     'BinomialTest', 'NormalTest', 'JeffreysTest',
+    
+    # Heterogeneity metrics
+    'HeterogeneityTest', 'SubgroupCalibrationTest', 'RatingHeterogeneityTest',
 
     # Stability metrics - to be added in future
     # 'PSI', 'CSI', 'TemporalDriftDetection'

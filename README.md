@@ -83,6 +83,13 @@ ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
 - Brier score and Brier skill score
 - Expected Calibration Error (ECE)
 - PD Calibration Stats (comprehensive calibration assessment)
+- Binomial and Normal tests for overall calibration
+- Jeffreys test for rating-based calibration
+
+#### Heterogeneity Testing
+- Heterogeneity test for calibration consistency across segments
+- Subgroup calibration test for detailed subpopulation analysis
+- Statistical hypothesis testing for identifying problematic segments
 
 ### Coming Soon
 - Stability metrics (PSI, CSI)
@@ -93,14 +100,18 @@ ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
 ## Example
 
 ```python
-from crmstudio.metrics.pd.calibration import HosmerLemeshow
+from crmstudio.metrics.pd import HosmerLemeshow, HeterogeneityTest
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+import numpy as np
 
 # Create synthetic data
 X, y = make_classification(n_samples=1000, weights=[0.9, 0.1], random_state=42)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+
+# Create segments for heterogeneity testing
+segments = np.random.choice(['A', 'B', 'C'], size=len(y_test))
 
 # Train model
 model = LogisticRegression().fit(X_train, y_train)
@@ -111,10 +122,20 @@ hl = HosmerLemeshow(model_name="example_model")
 result = hl.compute(y_true=y_test, y_pred=y_pred)
 
 # Display results
-print(f"p-value: {result.value:.4f} ({'Passed' if result.passed else 'Failed'})")
+print(f"Hosmer-Lemeshow p-value: {result.value:.4f} ({'Passed' if result.passed else 'Failed'})")
+
+# Test for heterogeneity across segments
+het_test = HeterogeneityTest(model_name="example_model")
+het_result = het_test.compute(y_true=y_test, y_pred=y_pred, segments=segments)
+
+print(f"Heterogeneity test p-value: {het_result.value:.4f}")
+print(f"Calibration homogeneity: {'Passed' if het_result.passed else 'Failed'}")
 
 # Plot the calibration chart
 hl.show_plot()
+
+# Plot heterogeneity results
+het_test.show_plot()
 ```
 
 ## Contributing

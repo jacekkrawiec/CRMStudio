@@ -3,32 +3,32 @@ Calibration metrics for probability of default (PD) models.
 
 This module provides metrics for assessing the calibration quality of PD models,
 including Hosmer-Lemeshow test, Brier score, Expected Calibration Error (ECE),
-and calibration curves.
+calibration curves, and heterogeneity testing.
 
-TODO:
+The metrics in this module assess various aspects of model calibration:
+1. Overall calibration quality (Hosmer-Lemeshow, Brier score)
+2. Granular calibration assessment (ECE, calibration curves)
+3. Statistical tests for calibration (Binomial test, Normal test, Jeffreys test)
+4. Heterogeneity testing (calibration consistency across segments/subgroups)
+
 Based on EBA Supervisory handbook on the validation of IRB rating systems:
 https://www.eba.europa.eu/sites/default/files/document_library/Publications/Reports/2023/1061495/Supervisory%20handbook%20on%20the%20validation%20of%20IRB%20rating%20systems%20revised.pdf
 
-1. homogeneity
-2. heterogeneity
-
-Note that EBA mentions both metrics in the distriminatory power section. 
-However, conceptually it's closer to calibration, as it concerns pooling quality.
-
 TODO:
-
 We need an overtime measure, all our metrics are point in time, looking at a specific snapshot data.
-We also need to check wether DRs observed in the long term cross any of the CI lines.
-
+We also need to check whether DRs observed in the long term cross any of the CI lines.
 """
 
 import numpy as np
 import pandas as pd
 from scipy import stats
+import warnings
+from typing import Dict, List, Optional, Tuple, Union
 from sklearn.metrics import brier_score_loss
 from sklearn.calibration import calibration_curve
 
-from ...core.base import BaseMetric, MetricResult
+from ...core.base import BaseMetric
+from ...core.data_classes import MetricResult
 
 class HosmerLemeshow(BaseMetric):
     """
@@ -1281,3 +1281,713 @@ class NormalTest(BaseMetric):
             )
 
 
+class HeterogeneityTest(BaseMetric):
+    """
+    Test for calibration heterogeneity across subpopulations in credit risk models.
+    
+    This test evaluates if a model's calibration is consistent across different segments
+    of the portfolio, highlighting potential issues with model specification or data quality
+    that may not be apparent when examining the entire portfolio.
+    
+    The test is based on comparing the observed vs expected default rates across different
+    segments using chi-squared statistics, extending the concept of the Hosmer-Lemeshow test
+    to explicitly focus on heterogeneity across business-meaningful segments.
+    
+    Null Hypothesis (H0): The model calibration is homogeneous across all segments; 
+                          any observed differences in calibration across segments 
+                          are due to random chance.
+    
+    Alternative Hypothesis (H1): There are statistically significant differences in model
+                                calibration across segments, indicating heterogeneity that
+                                cannot be explained by random chance.
+    
+    Interpretation Guidelines:
+        - A low p-value (typically < 0.05) indicates statistically significant evidence
+          against the null hypothesis, suggesting heterogeneity in calibration across segments.
+        
+        - A high p-value does not necessarily prove homogeneity, but rather indicates
+          insufficient evidence to reject homogeneity.
+        
+        - Review the per-segment details to identify which segments contribute most
+          to heterogeneity.
+        
+        - Consider the practical significance of the deviations in addition to statistical
+          significance.
+    
+    Regulatory Context:
+        - Basel Committee on Banking Supervision (BCBS) guidelines emphasize the importance
+          of model performance consistency across different segments of the portfolio.
+        
+        - European Banking Authority (EBA) IRB guidelines require institutions to analyze
+          the stability of risk estimates across different application segments.
+        
+        - ECB TRIM guidelines highlight the need to assess model performance across
+          different subpopulations to ensure the model is appropriate for all segments.
+    
+    References:
+        - D'Agostino, R., & Stephens, M. (1986). Goodness-of-fit techniques.
+        - Hosmer, D. W., & Lemeshow, S. (2000). Applied Logistic Regression.
+        - Basel Committee on Banking Supervision (2006). "Studies on the Validation
+          of Internal Rating Systems".
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+    
+    def _compute_raw(self, y_true=None, y_pred=None, segments=None, **kwargs):
+        """
+        Compute the heterogeneity test across specified segments.
+        
+        Parameters
+        ----------
+        y_true : array-like
+            Binary target values (0 = non-default, 1 = default).
+        y_pred : array-like
+            Predicted probabilities of default.
+        segments : array-like
+            Segment identifiers for each observation. Could be categorical values
+            representing business segments, risk buckets, or any other meaningful
+            segmentation of the portfolio.
+            
+        Returns
+        -------
+        MetricResult
+            Results of the heterogeneity test, including:
+                - value: p-value of the test
+                - passed: boolean indicating whether heterogeneity is not statistically significant
+                - details: segment-level information and test statistics
+                - figure_data: data for visualization of observed vs expected default rates by segment
+        """
+        # Input validation
+        if segments is None:
+            raise ValueError("Segments parameter is required for heterogeneity testing")
+            
+        if len(y_true) != len(y_pred) or len(y_true) != len(segments):
+            raise ValueError("Input arrays must have the same length")
+        
+        # Convert inputs to numpy arrays
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        segments = np.asarray(segments)
+        
+        # Get parameters from config or use defaults
+        confidence_level = self._get_param("confidence_level", default=0.95)
+        min_obs_per_segment = self._get_param("min_obs_per_segment", default=30)
+        
+        # Create a DataFrame for easier analysis
+        df = pd.DataFrame({
+            'actual': y_true,
+            'predicted': y_pred,
+            'segment': segments
+        })
+        
+        # Calculate metrics by segment
+        segment_stats = []
+        valid_segments = []
+        excluded_segments = []
+        
+        for segment, group in df.groupby('segment'):
+            n_obs = len(group)
+            
+            # Skip segments with too few observations
+            if n_obs < min_obs_per_segment:
+                excluded_segments.append({
+                    'segment': segment,
+                    'n_obs': n_obs,
+                    'reason': f'Fewer than {min_obs_per_segment} observations'
+                })
+                continue
+                
+            n_defaults = group['actual'].sum()
+            expected_defaults = group['predicted'].sum()
+            
+            observed_dr = n_defaults / n_obs
+            expected_dr = expected_defaults / n_obs
+            
+            # Calculate contribution to chi-square statistic
+            if expected_defaults > 0 and expected_defaults < n_obs:
+                # For default events
+                chi2_default = ((n_defaults - expected_defaults) ** 2) / expected_defaults
+                # For non-default events
+                chi2_non_default = ((n_obs - n_defaults - (n_obs - expected_defaults)) ** 2) / (n_obs - expected_defaults)
+                chi2_contribution = chi2_default + chi2_non_default
+            else:
+                # Handle edge cases where expected defaults is 0 or equals n_obs
+                chi2_contribution = 0
+                warnings.warn(f"Segment {segment} has expected defaults of {expected_defaults} (0 or equal to observations), skipping chi-square calculation.")
+            
+            segment_stats.append({
+                'segment': segment,
+                'n_obs': n_obs,
+                'n_defaults': n_defaults,
+                'expected_defaults': expected_defaults,
+                'observed_dr': observed_dr,
+                'expected_dr': expected_dr,
+                'chi2_contribution': chi2_contribution,
+                'abs_deviation': abs(observed_dr - expected_dr),
+                'rel_deviation': abs(observed_dr - expected_dr) / expected_dr if expected_dr > 0 else np.nan
+            })
+            
+            valid_segments.append(segment)
+        
+        # If no valid segments or only one segment, cannot perform heterogeneity test
+        if len(valid_segments) <= 1:
+            warnings.warn("Insufficient valid segments for heterogeneity testing.")
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=np.nan,
+                passed=None,
+                details={
+                    'confidence_level': confidence_level,
+                    'segments_analyzed': 0,
+                    'excluded_segments': excluded_segments,
+                    'segment_stats': segment_stats,
+                    'error': "Insufficient valid segments for heterogeneity testing"
+                }
+            )
+        
+        # Calculate overall chi-square statistic and p-value
+        overall_chi2 = sum(stat['chi2_contribution'] for stat in segment_stats)
+        degrees_of_freedom = len(valid_segments) - 1  # df = number of segments - 1
+        p_value = 1 - stats.chi2.cdf(overall_chi2, degrees_of_freedom)
+        
+        # Test result
+        alpha = 1 - confidence_level
+        passed = p_value >= alpha  # Null hypothesis: homogeneous calibration
+        
+        # Sort segments by absolute deviation for better result interpretation
+        segment_stats.sort(key=lambda x: x['abs_deviation'], reverse=True)
+        
+        # Prepare data for visualization
+        segments_for_plot = [str(stat['segment']) for stat in segment_stats]
+        observed_drs = [stat['observed_dr'] for stat in segment_stats]
+        expected_drs = [stat['expected_dr'] for stat in segment_stats]
+        abs_deviations = [stat['abs_deviation'] for stat in segment_stats]
+        
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=p_value,  # p-value as the metric value
+            passed=passed,
+            details={
+                'confidence_level': confidence_level,
+                'segments_analyzed': len(valid_segments),
+                'excluded_segments': excluded_segments,
+                'chi2_statistic': float(overall_chi2),
+                'degrees_of_freedom': degrees_of_freedom,
+                'segment_stats': segment_stats
+            },
+            figure_data={
+                'x': segments_for_plot,
+                'y': observed_drs,
+                'y_expected': expected_drs,
+                'abs_deviation': abs_deviations,
+                'title': f'Calibration Heterogeneity Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
+                'xlabel': 'Segment',
+                'ylabel': 'Default Rate',
+                'plot_type': 'heterogeneity',
+                'annotations': [
+                    f'Confidence Level: {confidence_level*100:.0f}%',
+                    f'Chi-Square: {overall_chi2:.2f}',
+                    f'Degrees of Freedom: {degrees_of_freedom}',
+                    f'p-value: {p_value:.4f}',
+                    f'Segments Analyzed: {len(valid_segments)}',
+                    f'Segments Excluded: {len(excluded_segments)}'
+                ],
+            }
+        )
+
+
+class RatingHeterogeneityTest(BaseMetric):
+    """
+    Test for assessing the heterogeneity between adjacent rating grades.
+    
+    This test evaluates whether consecutive rating grades show statistically significant
+    differences in observed default rates, which is essential for a well-differentiated
+    rating system. A properly functioning rating system should have distinct and statistically
+    significant differences in default rates between neighboring grades.
+    
+    The test performs pairwise comparisons between adjacent rating grades using statistical
+    tests (e.g., Fisher's exact test or proportion tests) to determine if the observed
+    differences in default rates are significant or could occur by random chance.
+    
+    Null Hypothesis (H0): For each pair of adjacent rating grades, the default rates are
+                          not significantly different (the grades do not effectively 
+                          differentiate risk).
+    
+    Alternative Hypothesis (H1): For each pair of adjacent rating grades, the default rates
+                                are significantly different (the grades effectively
+                                differentiate risk).
+    
+    Interpretation Guidelines:
+        - A low p-value for a pair of adjacent grades indicates statistically significant
+          differentiation (desirable).
+        
+        - High p-values suggest adjacent grades may not be sufficiently differentiated,
+          potentially indicating rating grade compression or boundary issues.
+        
+        - The test results help identify where the rating scale may need recalibration
+          or where adjacent grades might be candidates for merging.
+        
+        - Consider both statistical significance and the magnitude of differences between
+          adjacent grades.
+    
+    Regulatory Context:
+        - Basel Committee on Banking Supervision guidelines require that rating systems 
+          provide for a meaningful differentiation of risk.
+        
+        - EBA guidelines on PD estimation require institutions to demonstrate that the 
+          rating system provides for a meaningful differentiation of risk.
+        
+        - ECB TRIM guidelines emphasize the need for clear separation between rating grades
+          in terms of default risk.
+    
+    References:
+        - Basel Committee on Banking Supervision (2006). "International Convergence of 
+          Capital Measurement and Capital Standards: A Revised Framework."
+        - European Banking Authority (2017). "Guidelines on PD estimation, LGD estimation
+          and the treatment of defaulted exposures."
+        - Tasche, D. (2009). "Estimating discriminatory power and PD curves when the number
+          of defaults is small."
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+
+    def _compute_raw(self, y_true=None, y_pred=None, ratings=None, **kwargs):
+        """
+        Compute heterogeneity test for adjacent rating grades.
+        
+        Parameters
+        ----------
+        y_true : array-like
+            Binary target values (0 = non-default, 1 = default).
+        y_pred : array-like
+            Predicted probabilities of default.
+        ratings : array-like
+            Rating grade assignments for each observation. This parameter is required.
+            
+        Returns
+        -------
+        MetricResult
+            Results of the rating heterogeneity test, including:
+                - value: proportion of adjacent rating pairs with significant differentiation
+                - passed: boolean indicating whether all adjacent rating pairs show significant differentiation
+                - details: pair-level statistics and test results
+                - figure_data: data for visualization of default rates across rating grades
+        """
+        # Input validation
+        if ratings is None:
+            raise ValueError("Ratings parameter is required for rating heterogeneity testing")
+            
+        if len(y_true) != len(ratings):
+            raise ValueError("Input arrays must have the same length")
+        
+        # Convert inputs to numpy arrays
+        y_true = np.asarray(y_true)
+        ratings = np.asarray(ratings)
+        
+        # Get parameters from config or use defaults
+        confidence_level = self._get_param("confidence_level", default=0.95)
+        min_obs_per_rating = self._get_param("min_obs_per_rating", default=30)
+        test_method = self._get_param("test_method", default="fisher")  # Options: "fisher", "proportion", "chi2"
+        ascending = self._get_param("ascending", default=True)  # True if ratings increase with better quality
+        
+        # Create a DataFrame for easier analysis
+        df = pd.DataFrame({
+            'actual': y_true,
+            'rating': ratings
+        })
+        
+        # Get unique ratings and sort them
+        unique_ratings = np.unique(ratings)
+        
+        # Sort ratings based on whether lower ratings indicate better or worse quality
+        # By default (ascending=True), we assume ratings increase with better quality (lower PD)
+        # This means we expect default rates to decrease as rating values increase
+        if ascending:
+            sorted_ratings = sorted(unique_ratings)
+        else:
+            sorted_ratings = sorted(unique_ratings, reverse=True)
+        
+        # Calculate default rates and counts for each rating
+        rating_stats = []
+        excluded_ratings = []
+        
+        for rating in sorted_ratings:
+            mask = ratings == rating
+            n_obs = mask.sum()
+            
+            # Skip ratings with too few observations
+            if n_obs < min_obs_per_rating:
+                excluded_ratings.append({
+                    'rating': rating,
+                    'n_obs': n_obs,
+                    'reason': f'Fewer than {min_obs_per_rating} observations'
+                })
+                continue
+                
+            n_defaults = y_true[mask].sum()
+            default_rate = n_defaults / n_obs
+            
+            rating_stats.append({
+                'rating': rating,
+                'n_obs': n_obs,
+                'n_defaults': n_defaults,
+                'default_rate': default_rate
+            })
+        
+        # If less than 2 valid ratings, cannot perform heterogeneity test
+        if len(rating_stats) < 2:
+            warnings.warn("Insufficient valid ratings for heterogeneity testing.")
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=np.nan,
+                passed=None,
+                details={
+                    'confidence_level': confidence_level,
+                    'ratings_analyzed': len(rating_stats),
+                    'excluded_ratings': excluded_ratings,
+                    'rating_stats': rating_stats,
+                    'error': "Insufficient valid ratings for heterogeneity testing"
+                }
+            )
+        
+        # Perform pairwise comparisons between adjacent rating grades
+        pair_results = []
+        
+        for i in range(len(rating_stats) - 1):
+            r1 = rating_stats[i]
+            r2 = rating_stats[i + 1]
+            
+            # Compute the statistical test between adjacent rating grades
+            if test_method == "fisher":
+                # Fisher's exact test
+                table = np.array([
+                    [r1['n_defaults'], r1['n_obs'] - r1['n_defaults']],
+                    [r2['n_defaults'], r2['n_obs'] - r2['n_defaults']]
+                ])
+                _, p_value = stats.fisher_exact(table)
+            elif test_method == "proportion":
+                # Proportion z-test
+                count = np.array([r1['n_defaults'], r2['n_defaults']])
+                nobs = np.array([r1['n_obs'], r2['n_obs']])
+                stat, p_value = stats.proportions_ztest(count, nobs)
+            elif test_method == "chi2":
+                # Chi-square test
+                table = np.array([
+                    [r1['n_defaults'], r1['n_obs'] - r1['n_defaults']],
+                    [r2['n_defaults'], r2['n_obs'] - r2['n_defaults']]
+                ])
+                stat, p_value, _, _ = stats.chi2_contingency(table)
+            else:
+                raise ValueError(f"Unknown test method: {test_method}")
+            
+            # Calculate absolute and relative difference
+            abs_diff = abs(r1['default_rate'] - r2['default_rate'])
+            rel_diff = abs_diff / max(r1['default_rate'], r2['default_rate']) if max(r1['default_rate'], r2['default_rate']) > 0 else np.nan
+            
+            # Determine if difference is significant
+            alpha = 1 - confidence_level
+            is_significant = p_value < alpha
+            
+            pair_results.append({
+                'rating1': r1['rating'],
+                'rating2': r2['rating'],
+                'dr1': r1['default_rate'],
+                'dr2': r2['default_rate'],
+                'n_obs1': r1['n_obs'],
+                'n_obs2': r2['n_obs'],
+                'n_defaults1': r1['n_defaults'],
+                'n_defaults2': r2['n_defaults'],
+                'abs_diff': abs_diff,
+                'rel_diff': rel_diff,
+                'p_value': p_value,
+                'is_significant': is_significant,
+                'test_method': test_method
+            })
+        
+        # Calculate overall result
+        significant_pairs = sum(1 for pair in pair_results if pair['is_significant'])
+        proportion_significant = significant_pairs / len(pair_results) if pair_results else 0
+        
+        # Test is passed if all adjacent pairs show significant differentiation
+        passed = proportion_significant == 1.0
+        
+        # Prepare data for visualization
+        ratings_for_plot = [str(stat['rating']) for stat in rating_stats]
+        default_rates = [stat['default_rate'] for stat in rating_stats]
+        n_obs_values = [stat['n_obs'] for stat in rating_stats]
+        
+        # Mark ratings with significant difference to next rating
+        significant_markers = []
+        for i in range(len(ratings_for_plot)):
+            if i < len(ratings_for_plot) - 1:
+                pair_idx = i
+                is_sig = pair_results[pair_idx]['is_significant']
+                significant_markers.append(is_sig)
+            else:
+                # Last rating has no pair
+                significant_markers.append(None)
+        
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=proportion_significant,  # Proportion of significantly different adjacent pairs
+            passed=passed,
+            details={
+                'confidence_level': confidence_level,
+                'test_method': test_method,
+                'ratings_analyzed': len(rating_stats),
+                'excluded_ratings': excluded_ratings,
+                'rating_stats': rating_stats,
+                'pair_results': pair_results,
+                'significant_pairs': significant_pairs,
+                'total_pairs': len(pair_results),
+                'proportion_significant': proportion_significant
+            },
+            figure_data={
+                'x': ratings_for_plot,
+                'y': default_rates,
+                'n_obs': n_obs_values,
+                'significant_markers': significant_markers,
+                'title': f'Rating Heterogeneity Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
+                'xlabel': 'Rating Grade',
+                'ylabel': 'Default Rate',
+                'plot_type': 'rating_heterogeneity',
+                'annotations': [
+                    f'Confidence Level: {confidence_level*100:.0f}%',
+                    f'Test Method: {test_method}',
+                    f'Ratings Analyzed: {len(rating_stats)}',
+                    f'Significant Pairs: {significant_pairs}/{len(pair_results)} ({proportion_significant*100:.0f}%)',
+                    f'Result: {"Passed" if passed else "Failed"}'
+                ],
+            }
+        )
+
+
+class SubgroupCalibrationTest(BaseMetric):
+    """
+    Test for calibration consistency within subgroups of a credit risk model portfolio.
+    
+    This test is designed to identify potential issues with model calibration for specific
+    subgroups that may be subject to regulatory scrutiny or business concerns, such as
+    different geographic regions, customer segments, or product types.
+    
+    Unlike the HeterogeneityTest which focuses on overall heterogeneity across segments,
+    this test provides detailed calibration assessment for each specified subgroup against
+    a benchmark or expected calibration.
+    
+    Null Hypothesis (H0): For each subgroup, the model's calibration is consistent with
+                          the expected calibration, and any observed differences are
+                          due to random chance.
+    
+    Alternative Hypothesis (H1): For at least one subgroup, there is a statistically
+                                significant difference between observed and expected
+                                calibration that cannot be explained by random chance.
+    
+    Interpretation Guidelines:
+        - A low p-value for a specific subgroup indicates potential calibration issues
+          for that subgroup.
+        
+        - Consider both statistical significance and the magnitude of calibration differences.
+        
+        - Evaluate the proportion of subgroups with calibration issues to assess the
+          overall model quality.
+        
+        - Investigate the characteristics of problematic subgroups to identify potential
+          model weaknesses.
+    
+    Regulatory Context:
+        - BCBS Guidance emphasizes the importance of assessing model performance for 
+          meaningful subsets of exposures.
+        
+        - ECB TRIM guidelines require the analysis of model performance across different
+          application segments.
+        
+        - EBA guidelines stress the need to ensure models perform consistently across
+          different types of exposures.
+    
+    References:
+        - Blochwitz, S., et al. (2005). "Myth and reality of discriminatory power for 
+          rating systems." Wilmott Magazine.
+        - Basel Committee on Banking Supervision (2005). "Studies on validation of
+          internal rating systems."
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+
+    def _compute_raw(self, y_true=None, y_pred=None, subgroups=None, reference_calibration=None, **kwargs):
+        """
+        Compute calibration test for each specified subgroup.
+        
+        Parameters
+        ----------
+        y_true : array-like
+            Binary target values (0 = non-default, 1 = default).
+        y_pred : array-like
+            Predicted probabilities of default.
+        subgroups : array-like
+            Subgroup identifiers for each observation.
+        reference_calibration : Dict, optional
+            Reference calibration to compare against. If None, the overall portfolio
+            calibration is used as reference.
+            
+        Returns
+        -------
+        MetricResult
+            Results of the subgroup calibration test, including:
+                - value: proportion of subgroups with acceptable calibration
+                - passed: boolean indicating whether all significant subgroups have acceptable calibration
+                - details: subgroup-level calibration information and test statistics
+                - figure_data: data for visualization of calibration by subgroup
+        """
+        # Input validation
+        if subgroups is None:
+            raise ValueError("Subgroups parameter is required for subgroup calibration testing")
+            
+        if len(y_true) != len(y_pred) or len(y_true) != len(subgroups):
+            raise ValueError("Input arrays must have the same length")
+        
+        # Convert inputs to numpy arrays
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        subgroups = np.asarray(subgroups)
+        
+        # Get parameters from config or use defaults
+        confidence_level = self._get_param("confidence_level", default=0.95)
+        min_obs_per_subgroup = self._get_param("min_obs_per_subgroup", default=50)
+        
+        # Create a DataFrame for easier analysis
+        df = pd.DataFrame({
+            'actual': y_true,
+            'predicted': y_pred,
+            'subgroup': subgroups
+        })
+        
+        # Calculate overall calibration if no reference provided
+        if reference_calibration is None:
+            total_defaults = df['actual'].sum()
+            total_expected = df['predicted'].sum()
+            total_obs = len(df)
+            overall_observed_dr = total_defaults / total_obs
+            overall_expected_dr = total_expected / total_obs
+            reference_calibration = {
+                'observed_dr': overall_observed_dr,
+                'expected_dr': overall_expected_dr
+            }
+        
+        # Calculate metrics by subgroup
+        subgroup_stats = []
+        excluded_subgroups = []
+        
+        for subgroup, group in df.groupby('subgroup'):
+            n_obs = len(group)
+            
+            # Skip subgroups with too few observations
+            if n_obs < min_obs_per_subgroup:
+                excluded_subgroups.append({
+                    'subgroup': subgroup,
+                    'n_obs': n_obs,
+                    'reason': f'Fewer than {min_obs_per_subgroup} observations'
+                })
+                continue
+                
+            n_defaults = group['actual'].sum()
+            expected_defaults = group['predicted'].sum()
+            
+            observed_dr = n_defaults / n_obs
+            expected_dr = expected_defaults / n_obs
+            
+            # Calculate statistical significance
+            # Using binomial test to compare observed defaults with expected defaults
+            p_value = stats.binom_test(
+                n_defaults, 
+                n_obs, 
+                expected_dr, 
+                alternative='two-sided'
+            )
+            
+            # Calculate effect size
+            effect_size = abs(observed_dr - expected_dr)
+            relative_effect = effect_size / expected_dr if expected_dr > 0 else np.nan
+            
+            # Determine if calibration is acceptable
+            alpha = 1 - confidence_level
+            statistically_significant = p_value < alpha
+            calibration_acceptable = not statistically_significant
+            
+            subgroup_stats.append({
+                'subgroup': subgroup,
+                'n_obs': n_obs,
+                'n_defaults': n_defaults,
+                'expected_defaults': expected_defaults,
+                'observed_dr': observed_dr,
+                'expected_dr': expected_dr,
+                'p_value': p_value,
+                'effect_size': effect_size,
+                'relative_effect': relative_effect,
+                'statistically_significant': statistically_significant,
+                'calibration_acceptable': calibration_acceptable
+            })
+        
+        # If no valid subgroups, cannot perform test
+        if not subgroup_stats:
+            warnings.warn("No valid subgroups for calibration testing.")
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=np.nan,
+                passed=None,
+                details={
+                    'confidence_level': confidence_level,
+                    'reference_calibration': reference_calibration,
+                    'excluded_subgroups': excluded_subgroups,
+                    'error': "No valid subgroups for calibration testing"
+                }
+            )
+        
+        # Calculate overall result
+        valid_subgroups_count = len(subgroup_stats)
+        acceptable_calibration_count = sum(1 for stat in subgroup_stats if stat['calibration_acceptable'])
+        proportion_acceptable = acceptable_calibration_count / valid_subgroups_count
+        
+        # Test is passed if all subgroups have acceptable calibration
+        passed = proportion_acceptable == 1.0
+        
+        # Sort subgroups by effect size for better result interpretation
+        subgroup_stats.sort(key=lambda x: x['effect_size'], reverse=True)
+        
+        # Prepare data for visualization
+        subgroups_for_plot = [str(stat['subgroup']) for stat in subgroup_stats]
+        observed_drs = [stat['observed_dr'] for stat in subgroup_stats]
+        expected_drs = [stat['expected_dr'] for stat in subgroup_stats]
+        p_values = [stat['p_value'] for stat in subgroup_stats]
+        significant = [stat['statistically_significant'] for stat in subgroup_stats]
+        
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=proportion_acceptable,  # Proportion of subgroups with acceptable calibration
+            passed=passed,
+            details={
+                'confidence_level': confidence_level,
+                'reference_calibration': reference_calibration,
+                'subgroups_analyzed': valid_subgroups_count,
+                'subgroups_acceptable': acceptable_calibration_count,
+                'proportion_acceptable': proportion_acceptable,
+                'excluded_subgroups': excluded_subgroups,
+                'subgroup_stats': subgroup_stats
+            },
+            figure_data={
+                'x': subgroups_for_plot,
+                'y': observed_drs,
+                'y_expected': expected_drs,
+                'p_values': p_values,
+                'significant': significant,
+                'title': f'Subgroup Calibration Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
+                'xlabel': 'Subgroup',
+                'ylabel': 'Default Rate',
+                'plot_type': 'subgroup_calibration',
+                'annotations': [
+                    f'Confidence Level: {confidence_level*100:.0f}%',
+                    f'Subgroups Analyzed: {valid_subgroups_count}',
+                    f'Subgroups with Acceptable Calibration: {acceptable_calibration_count} ({proportion_acceptable*100:.0f}%)',
+                    f'Subgroups Excluded: {len(excluded_subgroups)}'
+                ],
+            }
+        )
