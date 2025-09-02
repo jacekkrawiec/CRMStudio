@@ -4,6 +4,22 @@ Calibration metrics for probability of default (PD) models.
 This module provides metrics for assessing the calibration quality of PD models,
 including Hosmer-Lemeshow test, Brier score, Expected Calibration Error (ECE),
 and calibration curves.
+
+TODO:
+Based on EBA Supervisory handbook on the validation of IRB rating systems:
+https://www.eba.europa.eu/sites/default/files/document_library/Publications/Reports/2023/1061495/Supervisory%20handbook%20on%20the%20validation%20of%20IRB%20rating%20systems%20revised.pdf
+
+1. homogeneity
+2. heterogeneity
+
+Note that EBA mentions both metrics in the distriminatory power section. 
+However, conceptually it's closer to calibration, as it concerns pooling quality.
+
+TODO:
+
+We need an overtime measure, all our metrics are point in time, looking at a specific snapshot data.
+We also need to check wether DRs observed in the long term cross any of the CI lines.
+
 """
 
 import numpy as np
@@ -11,7 +27,6 @@ import pandas as pd
 from scipy import stats
 from sklearn.metrics import brier_score_loss
 from sklearn.calibration import calibration_curve
-from typing import Tuple, Dict, List, Optional, Union
 
 from ...core.base import BaseMetric, MetricResult
 
@@ -21,6 +36,19 @@ class HosmerLemeshow(BaseMetric):
     
     This test evaluates whether the observed event rates match expected event rates
     in subgroups of the model population. A small p-value indicates poor calibration.
+    
+    Hypothesis test:
+    - H0: The model is well-calibrated (observed rates match expected rates)
+    - H1: The model is not well-calibrated (observed rates differ from expected rates)
+    
+    References:
+    ----------
+    - Regulatory: Basel Committee on Banking Supervision (2005). "Studies on the Validation 
+      of Internal Rating Systems," Working Paper No. 14.
+    - Academic: Hosmer, D.W., Lemeshow, S. (2000). "Applied Logistic Regression," 
+      2nd Edition, John Wiley & Sons.
+    - Regulatory: European Banking Authority (2017). "Guidelines on PD estimation, 
+      LGD estimation and the treatment of defaulted exposures," EBA/GL/2017/16.
     """
     def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
         super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
@@ -216,6 +244,14 @@ class CalibrationCurve(BaseMetric):
     When ratings are provided, the calibration is evaluated at the rating level,
     which is more relevant for credit risk models where observations are often
     grouped into discrete rating grades.
+    
+    References:
+    ----------
+    - Regulatory: Oesterreichische Nationalbank (OeNB) (2004). "Rating Models and Validation," 
+      Guidelines on Credit Risk Management. 
+      https://www.oenb.at/dam/jcr:1db13877-21a0-40f8-b46c-d8448f162794/rating_models_tcm16-22933.pdf
+    - Academic: DeGroot, M.H., Fienberg, S.E. (1983). "The Comparison and Evaluation of Forecasters," 
+      Journal of the Royal Statistical Society: Series D, 32(1), 12-22.
     """
     def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
         super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
@@ -348,6 +384,216 @@ class CalibrationCurve(BaseMetric):
         )
 
 
+class ExpectedCalibrationError(BaseMetric):
+    """
+    Calculate the Expected Calibration Error (ECE).
+
+    ECE is a weighted average of the absolute difference between
+    predicted probabilities and observed frequencies, where weights
+    are determined by the number of samples in each bin.
+
+    In credit risk modeling, this metric assesses how well a model's predicted
+    probabilities align with actual default rates. Unlike formal hypothesis tests,
+    ECE does not have explicit H0/H1 formulations, but rather measures calibration
+    quality directly, with lower values indicating better calibration.
+
+    The metric can operate in two modes:
+    1. Standard mode: Using equal-width probability bins (default)
+    2. Rating mode: Using provided rating grades
+
+    When ratings are provided, the calibration error is evaluated at the rating level,
+    which is more relevant for credit risk models where observations are often
+    grouped into discrete rating grades.
+
+    References:
+    ----------
+    - Academic: Naeini, M.P., Cooper, G., Hauskrecht, M. (2015). "Obtaining Well Calibrated Probabilities Using Bayesian Binning," 
+      Proceedings of the AAAI Conference on Artificial Intelligence, 29(1).
+    - Academic: Guo, C., Pleiss, G., Sun, Y., Weinberger, K.Q. (2017). "On Calibration of Modern Neural Networks," 
+      Proceedings of the 34th International Conference on Machine Learning (ICML), PMLR 70:1321-1330.
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+    
+    def _compute_raw(self, y_true=None, y_pred=None, ratings=None, **kwargs):
+        """
+        Calculate the Expected Calibration Error.
+        
+        Parameters
+        ----------
+        y_true : array-like
+            Binary target values (0,1)
+        y_pred : array-like
+            Predicted probabilities
+        ratings : array-like, optional
+            Rating grades or bucket assignments for each observation.
+            If provided, calculations will be performed at the rating level
+            instead of using equal-sized bins.
+            
+        Returns
+        -------
+        MetricResult
+            Containing the ECE value and bin details
+        """
+        n_bins = self._get_param("n_bins", default=10)
+        
+        # Convert inputs to numpy arrays
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        
+        # Check if ratings are provided
+        use_ratings = ratings is not None
+        
+        if use_ratings:
+            ratings = np.asarray(ratings)
+            unique_ratings = np.unique(ratings)
+            n_ratings = len(unique_ratings)
+            
+            # Sort ratings by average PD (ascending)
+            rating_avg_pd = {r: np.mean(y_pred[ratings == r]) for r in unique_ratings}
+            sorted_ratings = sorted(unique_ratings, key=lambda r: rating_avg_pd[r])
+            
+            # Initialize variables for ECE calculation
+            total_samples = len(y_true)
+            ece = 0.0
+            bin_details = []
+            
+            # Calculate ECE using ratings
+            for i, rating in enumerate(sorted_ratings):
+                mask = ratings == rating
+                bin_samples = np.sum(mask)
+                
+                if bin_samples > 0:
+                    bin_y_true = y_true[mask]
+                    bin_y_pred = y_pred[mask]
+                    
+                    # Calculate observed and predicted probabilities
+                    observed_prob = np.mean(bin_y_true)
+                    predicted_prob = np.mean(bin_y_pred)
+                    
+                    # Update ECE (weighted absolute difference)
+                    ece += (bin_samples / total_samples) * abs(observed_prob - predicted_prob)
+                    
+                    # Store bin details
+                    bin_details.append({
+                        'bin': i + 1,
+                        'rating': str(rating),
+                        'n_samples': int(bin_samples),
+                        'observed_prob': float(observed_prob),
+                        'predicted_prob': float(predicted_prob),
+                        'calibration_error': float(abs(observed_prob - predicted_prob))
+                    })
+            
+            # Prepare figure data for rating-based ECE
+            bin_labels = [b['rating'] for b in bin_details]
+            observed_probs = [b['observed_prob'] for b in bin_details]
+            predicted_probs = [b['predicted_prob'] for b in bin_details]
+            calibration_errors = [b['calibration_error'] for b in bin_details]
+            sample_counts = [b['n_samples'] for b in bin_details]
+            
+            figure_data = {
+                'x': list(range(len(bin_details))),
+                'y_observed': observed_probs,
+                'y_predicted': predicted_probs,
+                'bin_labels': bin_labels,
+                'errors': calibration_errors,
+                'weights': sample_counts,
+                'title': f'Expected Calibration Error by Rating (ECE = {ece:.4f})',
+                'xlabel': 'Rating Grade',
+                'ylabel': 'Probability',
+                'plot_type': 'ece',
+                'annotations': [
+                    f'ECE: {ece:.4f}',
+                    f'Number of Ratings: {len(bin_details)}',
+                    f'Total Samples: {total_samples}',
+                ],
+            }
+            
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=ece,
+                details={
+                    'use_ratings': True,
+                    'n_ratings': n_ratings,
+                    'bin_details': bin_details,
+                },
+                figure_data=figure_data
+            )
+        else:
+            # Standard ECE calculation using equal-width bins
+            
+            # Divide predictions into bins
+            bin_edges = np.linspace(0, 1, n_bins + 1)
+            bin_indices = np.digitize(y_pred, bin_edges[1:-1])
+            
+            # Initialize variables for ECE calculation
+            total_samples = len(y_true)
+            ece = 0.0
+            bin_details = []
+            
+            # Calculate ECE using bins
+            for i in range(n_bins):
+                bin_mask = bin_indices == i
+                bin_samples = np.sum(bin_mask)
+                
+                if bin_samples > 0:
+                    bin_y_true = y_true[bin_mask]
+                    bin_y_pred = y_pred[bin_mask]
+                    
+                    # Calculate observed and predicted probabilities
+                    observed_prob = np.mean(bin_y_true)
+                    predicted_prob = np.mean(bin_y_pred)
+                    
+                    # Update ECE (weighted absolute difference)
+                    ece += (bin_samples / total_samples) * abs(observed_prob - predicted_prob)
+                    
+                    # Store bin details
+                    bin_details.append({
+                        'bin': i + 1,
+                        'range': f"[{bin_edges[i]:.2f}, {bin_edges[i+1]:.2f})",
+                        'n_samples': int(bin_samples),
+                        'observed_prob': float(observed_prob),
+                        'predicted_prob': float(predicted_prob),
+                        'calibration_error': float(abs(observed_prob - predicted_prob))
+                    })
+            
+            # Prepare figure data for bin-based ECE
+            bin_labels = [f"Bin {b['bin']}" for b in bin_details]
+            observed_probs = [b['observed_prob'] for b in bin_details]
+            predicted_probs = [b['predicted_prob'] for b in bin_details]
+            calibration_errors = [b['calibration_error'] for b in bin_details]
+            sample_counts = [b['n_samples'] for b in bin_details]
+            
+            figure_data = {
+                'x': list(range(len(bin_details))),
+                'y_observed': observed_probs,
+                'y_predicted': predicted_probs,
+                'bin_labels': bin_labels,
+                'errors': calibration_errors,
+                'weights': sample_counts,
+                'title': f'Expected Calibration Error (ECE = {ece:.4f})',
+                'xlabel': 'Predicted Probability Bin',
+                'ylabel': 'Probability',
+                'plot_type': 'ece',
+                'annotations': [
+                    f'ECE: {ece:.4f}',
+                    f'Number of Bins: {n_bins}',
+                    f'Total Samples: {total_samples}',
+                ],
+            }
+            
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=ece,
+                details={
+                    'use_ratings': False,
+                    'n_bins': n_bins,
+                    'bin_edges': bin_edges.tolist(),
+                    'bin_details': bin_details,
+                },
+                figure_data=figure_data
+            )
+
 class BrierScore(BaseMetric):
     """
     Computes the Brier score for probabilistic predictions.
@@ -356,6 +602,17 @@ class BrierScore(BaseMetric):
     probabilities and actual outcomes. Lower values indicate better calibration,
     with 0 being perfect.
     
+    Unlike hypothesis tests, the Brier score is a direct measure of predictive
+    accuracy that quantifies the magnitude of calibration errors. It is particularly
+    useful for comparing multiple models, with lower scores indicating better
+    probabilistic forecasting performance.
+    
+    References:
+    ----------
+    - Regulatory: European Central Bank (2019). "ECB Guide to Internal Models: Risk-type-specific chapters," Section 7.
+    - Academic: Brier, G.W. (1950). "Verification of Forecasts Expressed in Terms of Probability," Monthly Weather Review, 78(1), 1-3.
+    - Regulatory: Oesterreichische Nationalbank (OeNB) (2004). "Rating Models and Validation," Guidelines on Credit Risk Management.
+
     When ratings are provided, the Brier score is calculated both overall
     and for each rating grade separately, providing more granular evaluation
     of model calibration across different segments of the portfolio.
@@ -428,10 +685,20 @@ class JeffreysTest(BaseMetric):
     Implement the Jeffreys test for PD calibration assessment.
     
     This test is defined in ECB's instructions on validation reporting section 2.5.3.1.
-    (https://www.bankingsupervision.europa.eu/activities/internal_models/shared/pdf/instructions_validation_reporting_credit_risk.en.pdf)
     
     The Jeffreys test uses a beta distribution with parameters a = D + 0.5 and b = N - D + 0.5,
     where D is the number of defaults and N is the total number of observations.
+    
+    Hypothesis test:
+    - H0: The PD calibration is accurate (predicted PD falls within the confidence interval)
+    - H1: The PD calibration is inaccurate (predicted PD falls outside the confidence interval)
+    
+    References:
+    ----------
+    - Regulatory: European Central Bank (2019). "Instructions for reporting the validation results of internal models," 
+      Section 2.5.3.1. https://www.bankingsupervision.europa.eu/activities/internal_models/shared/pdf/instructions_validation_reporting_credit_risk.en.pdf
+    - Academic: Tasche, D. (2008). "Validation of internal rating systems and PD estimates," 
+      The Analytics of Risk Model Validation, 169-196.
     
     When ratings are provided, the test is performed at the rating level,
     which provides a more granular assessment of calibration across different
@@ -616,185 +883,6 @@ class JeffreysTest(BaseMetric):
                 }
             )
 
-class ExpectedCalibrationError(BaseMetric):
-    """
-    Calculate the Expected Calibration Error (ECE).
-    
-    ECE is a weighted average of the absolute difference between
-    predicted probabilities and observed frequencies, where weights
-    are determined by the number of samples in each bin.
-    
-    The metric can operate in two modes:
-    1. Standard mode: Using equal-width probability bins (default)
-    2. Rating mode: Using provided rating grades
-    
-    When ratings are provided, the calibration error is evaluated at the rating level,
-    which is more relevant for credit risk models where observations are often
-    grouped into discrete rating grades.
-    """
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
-        
-    def _compute_raw(self, y_true=None, y_pred=None, ratings=None, **kwargs):
-        n_bins = self._get_param("n_bins", default=10)
-        
-        # Check if ratings are provided
-        use_ratings = ratings is not None
-        
-        if use_ratings:
-            # Convert inputs to numpy arrays
-            y_true = np.asarray(y_true)
-            y_pred = np.asarray(y_pred)
-            ratings = np.asarray(ratings)
-            
-            # Get unique ratings and sort by average PD
-            unique_ratings = np.unique(ratings)
-            n_ratings = len(unique_ratings)
-            
-            ece = 0.0
-            bin_details = []
-            
-            # Calculate statistics for each rating
-            for i, rating in enumerate(unique_ratings):
-                # Get predictions and labels for current rating
-                bin_mask = (ratings == rating)
-                bin_count = np.sum(bin_mask)
-                
-                if bin_count > 0:
-                    bin_preds = y_pred[bin_mask]
-                    bin_true = y_true[bin_mask]
-                    
-                    # Calculate average predicted probability and observed frequency
-                    bin_pred_mean = np.mean(bin_preds)
-                    bin_true_mean = np.mean(bin_true)
-                    
-                    # Calculate absolute calibration error for this rating
-                    bin_error = np.abs(bin_pred_mean - bin_true_mean)
-                    
-                    # Weight the error by the proportion of samples in this rating
-                    bin_weight = bin_count / len(y_true)
-                    ece += bin_weight * bin_error
-                    
-                    bin_details.append({
-                        'bin': i + 1,
-                        'rating': str(rating),
-                        'n_samples': int(bin_count),
-                        'mean_pred': float(bin_pred_mean),
-                        'mean_true': float(bin_true_mean),
-                        'error': float(bin_error),
-                        'weight': float(bin_weight),
-                    })
-            
-            # Create arrays for plot
-            mean_preds = [d['mean_pred'] for d in bin_details]
-            mean_trues = [d['mean_true'] for d in bin_details]
-            weights = [d['weight'] for d in bin_details]
-            rating_labels = [d['rating'] for d in bin_details]
-            
-            return MetricResult(
-                name=self.__class__.__name__,
-                value=float(ece),
-                details={
-                    'use_ratings': True,
-                    'n_ratings': n_ratings,
-                    'bin_details': bin_details,
-                },
-                figure_data={
-                    'x': mean_preds,  # Predicted probabilities
-                    'y': mean_trues,  # Observed frequencies
-                    'x_ref': [0, 1],  # Diagonal reference line x-coords
-                    'y_ref': [0, 1],  # Diagonal reference line y-coords
-                    'weights': weights,  # Sample weights for bubble size
-                    'rating_names': rating_labels,  # Rating labels for annotation
-                    'actual_label': 'Observed Default Rate',
-                    'ref_label': 'Perfect Calibration',
-                    'title': f'Expected Calibration Error by Rating Grade (ECE = {ece:.4f})',
-                    'xlabel': 'Mean Predicted Probability',
-                    'ylabel': 'Observed Default Rate',
-                    'plot_type': 'bubble',  # Indicate this should be a bubble plot
-                }
-            )
-        else:
-            # Create bins of equal width
-            bin_edges = np.linspace(0, 1, n_bins + 1)
-            bin_indices = np.digitize(y_pred, bin_edges[1:-1])
-            
-            ece = 0.0
-            bin_details = []
-            
-            for bin_idx in range(n_bins):
-                # Get predictions and labels for current bin
-                bin_mask = (bin_indices == bin_idx)
-                bin_count = np.sum(bin_mask)
-                
-                if bin_count > 0:
-                    bin_preds = y_pred[bin_mask]
-                    bin_true = y_true[bin_mask]
-                    
-                    # Calculate average predicted probability and observed frequency
-                    bin_pred_mean = np.mean(bin_preds)
-                    bin_true_mean = np.mean(bin_true)
-                    
-                    # Calculate absolute calibration error for this bin
-                    bin_error = np.abs(bin_pred_mean - bin_true_mean)
-                    
-                    # Weight the error by the proportion of samples in this bin
-                    bin_weight = bin_count / len(y_true)
-                    ece += bin_weight * bin_error
-                    
-                    bin_details.append({
-                        'bin': bin_idx + 1,
-                        'bin_lower': float(bin_edges[bin_idx]),
-                        'bin_upper': float(bin_edges[bin_idx + 1]),
-                        'n_samples': int(bin_count),
-                        'mean_pred': float(bin_pred_mean),
-                        'mean_true': float(bin_true_mean),
-                        'error': float(bin_error),
-                        'weight': float(bin_weight),
-                    })
-                else:
-                    bin_details.append({
-                        'bin': bin_idx + 1,
-                        'bin_lower': float(bin_edges[bin_idx]),
-                        'bin_upper': float(bin_edges[bin_idx + 1]),
-                        'n_samples': 0,
-                        'mean_pred': float('nan'),
-                        'mean_true': float('nan'),
-                        'error': float('nan'),
-                        'weight': 0.0,
-                    })
-            
-            # Create arrays for plot
-            bin_centers = [(bin_edges[i] + bin_edges[i+1])/2 for i in range(n_bins)]
-            mean_preds = [d['mean_pred'] for d in bin_details if d['n_samples'] > 0]
-            mean_trues = [d['mean_true'] for d in bin_details if d['n_samples'] > 0]
-            weights = [d['weight'] for d in bin_details if d['n_samples'] > 0]
-            valid_bin_centers = [bin_centers[i] for i, d in enumerate(bin_details) if d['n_samples'] > 0]
-            
-            return MetricResult(
-                name=self.__class__.__name__,
-                value=float(ece),
-                details={
-                    'use_ratings': False,
-                    'n_bins': n_bins,
-                    'bin_details': bin_details,
-                },
-                figure_data={
-                    'x': valid_bin_centers,  # Bin centers
-                    'y': mean_trues,  # Observed frequencies
-                    'x_ref': [0, 1],  # Diagonal reference line x-coords
-                    'y_ref': [0, 1],  # Diagonal reference line y-coords
-                    'weights': weights,  # Sample weights for bubble size
-                    'predictions': mean_preds,  # Average predictions for annotation
-                    'actual_label': 'Observed Frequency',
-                    'ref_label': 'Perfect Calibration',
-                    'title': f'Expected Calibration Error (ECE = {ece:.4f})',
-                    'xlabel': 'Predicted Probability',
-                    'ylabel': 'Observed Frequency',
-                    'plot_type': 'bubble',  # Indicate this should be a bubble plot
-                }
-            )
-
 class BinomialTest(BaseMetric):
     """
     Binomial test for PD calibration assessment.
@@ -802,8 +890,24 @@ class BinomialTest(BaseMetric):
     This test compares the observed number of defaults with the expected number
     based on predicted probabilities, using a binomial distribution.
     
+    The implementation follows OeNB methodology (Rating Models and Validation, p.121) using a one-sided test:
+    - H0: Observed defaults <= Expected defaults (model is well-calibrated or conservative)
+    - H1: Observed defaults > Expected defaults (model underestimates risk)
+    
+    The p-value represents the probability of observing at least as many defaults as were actually observed,
+    given the expected default rate from the model. Small p-values indicate the model may be underestimating risk.
+    
     The test can be performed at the portfolio level or at the rating grade level
     when ratings are provided.
+    
+    References:
+    ----------
+    - Regulatory: Basel Committee on Banking Supervision (2005). "Studies on validation of internal rating systems," 
+      Working Paper No. 14, pp. 30-31.
+    - Regulatory: European Banking Authority (2017). "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures," 
+      EBA/GL/2017/16, Section 5.3.4.
+    - Regulatory: Oesterreichische Nationalbank (OeNB) (2004). "Rating Models and Validation," 
+      Guidelines on Credit Risk Management, p. 121.
     """
     def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
         super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
@@ -864,16 +968,11 @@ class BinomialTest(BaseMetric):
                 n_defaults = int(np.sum(rating_y_true))
                 expected_defaults = np.sum(rating_y_pred)
                 
-                # Calculate p-value for two-sided binomial test
-                # Probability of observing <= n_defaults
-                p_lower = stats.binom.cdf(n_defaults, n_obs, expected_defaults / n_obs)
-                # Probability of observing >= n_defaults
-                p_upper = 1 - stats.binom.cdf(n_defaults - 1, n_obs, expected_defaults / n_obs)
-                
-                # Two-sided p-value is twice the minimum of p_lower and p_upper
-                p_value = 2 * min(p_lower, p_upper)
-                if p_value > 1:
-                    p_value = 1.0
+                # Calculate p-value for one-sided binomial test (OeNB methodology)
+                # This tests whether the observed defaults are significantly higher than expected
+                # H0: observed defaults <= expected defaults (model is well-calibrated or conservative)
+                # H1: observed defaults > expected defaults (model underestimates risk)
+                p_value = 1 - stats.binom.cdf(n_defaults - 1, n_obs, expected_defaults / n_obs)
                 
                 # Determine if test passes
                 passed = p_value > alpha
@@ -933,16 +1032,11 @@ class BinomialTest(BaseMetric):
             n_defaults = int(np.sum(y_true))
             expected_defaults = np.sum(y_pred)
             
-            # Calculate p-value for two-sided binomial test
-            # Probability of observing <= n_defaults
-            p_lower = stats.binom.cdf(n_defaults, n_obs, expected_defaults / n_obs)
-            # Probability of observing >= n_defaults
-            p_upper = 1 - stats.binom.cdf(n_defaults - 1, n_obs, expected_defaults / n_obs)
-            
-            # Two-sided p-value is twice the minimum of p_lower and p_upper
-            p_value = 2 * min(p_lower, p_upper)
-            if p_value > 1:
-                p_value = 1.0
+            # Calculate p-value for one-sided binomial test (OeNB methodology)
+            # This tests whether the observed defaults are significantly higher than expected
+            # H0: observed defaults <= expected defaults (model is well-calibrated or conservative)
+            # H1: observed defaults > expected defaults (model underestimates risk)
+            p_value = 1 - stats.binom.cdf(n_defaults - 1, n_obs, expected_defaults / n_obs)
             
             # Determine if test passes
             passed = p_value > alpha
@@ -976,3 +1070,214 @@ class BinomialTest(BaseMetric):
                     ],
                 }
             )
+
+
+class NormalTest(BaseMetric):
+    """
+    Normal test for PD calibration assessment.
+    
+    This test compares the observed number of defaults with the expected number
+    based on predicted probabilities, using a normal distribution.
+    
+    The implementation follows OeNB methodology (Rating Models and Validation, p.120) using a one-sided test:
+    - H0: Observed defaults <= Expected defaults (model is well-calibrated or conservative)
+    - H1: Observed defaults > Expected defaults (model underestimates risk)
+    
+    The test can be performed at the portfolio level or at the rating grade level
+    when ratings are provided.
+    
+    References:
+    ----------
+    - Regulatory: Basel Committee on Banking Supervision (2005). "Studies on validation of internal rating systems," 
+      Working Paper No. 14, pp. 30-31.
+    - Regulatory: European Banking Authority (2017). "Guidelines on PD estimation, LGD estimation and the treatment of defaulted exposures," 
+      EBA/GL/2017/16, Section 5.3.4.
+    - Regulatory: Oesterreichische Nationalbank (OeNB) (2004). "Rating Models and Validation," 
+      Guidelines on Credit Risk Management, p. 121.
+
+
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+    
+    def _compute_raw(self, y_true=None, y_pred=None, ratings=None, **kwargs):
+        """
+        Calculate the Normal test for PD calibration.
+        
+        Parameters
+        ----------
+        y_true : array-like
+            Binary target values (0,1)
+        y_pred : array-like
+            Predicted probabilities
+        ratings : array-like, optional
+            Rating grades or bucket assignments for each observation.
+            If provided, the test is performed at the rating level.
+            
+        Returns
+        -------
+        MetricResult
+            Containing the test result and p-values
+        """
+        # Check if ratings are provided
+        use_ratings = ratings is not None
+        
+        # Convert inputs to numpy arrays
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        
+        # Set confidence level
+        confidence_level = self._get_param("confidence_level", default=0.95)
+        alpha = 1 - confidence_level
+        
+        if use_ratings:
+            ratings = np.asarray(ratings)
+            unique_ratings = np.unique(ratings)
+            n_ratings = len(unique_ratings)
+            
+            # Sort ratings by average PD (ascending)
+            rating_avg_pd = {r: np.mean(y_pred[ratings == r]) for r in unique_ratings}
+            sorted_ratings = sorted(unique_ratings, key=lambda r: rating_avg_pd[r])
+            
+            rating_results = []
+            overall_passed = True
+            
+            for rating in sorted_ratings:
+                mask = ratings == rating
+                rating_y_true = y_true[mask]
+                rating_y_pred = y_pred[mask]
+                
+                # Skip ratings with no observations
+                if len(rating_y_true) == 0:
+                    continue
+                
+                # Calculate observed defaults and expected defaults
+                n_obs = len(rating_y_true)
+                n_defaults = int(np.sum(rating_y_true))
+                expected_defaults = np.sum(rating_y_pred)
+                
+                # Calculate z-score for normal test
+                if n_obs > 0:
+                    observed_dr = n_defaults / n_obs
+                    expected_dr = expected_defaults / n_obs
+                    se = np.sqrt(expected_dr * (1 - expected_dr) / n_obs) if n_obs > 1 else 1
+                    z_score = (observed_dr - expected_dr) / se if se > 0 else 0
+                    
+                    # Calculate p-value from z-score (one-sided test)
+                    p_value = 1 - stats.norm.cdf(z_score)
+                else:
+                    p_value = 1.0
+                
+                # Determine if test passes
+                passed = p_value > alpha
+                
+                # Update overall test result
+                if not passed:
+                    overall_passed = False
+                
+                rating_results.append({
+                    'rating': str(rating),
+                    'n_obs': int(n_obs),
+                    'n_defaults': int(n_defaults),
+                    'expected_defaults': float(expected_defaults),
+                    'observed_dr': float(observed_dr),
+                    'expected_dr': float(expected_dr),
+                    'z_score': float(z_score),
+                    'p_value': float(p_value),
+                    'passed': bool(passed)
+                })
+            
+            # Prepare figure data
+            rating_labels = [r['rating'] for r in rating_results]
+            n_obs_values = [r['n_obs'] for r in rating_results]
+            observed_defaults = [r['n_defaults'] for r in rating_results]
+            expected_defaults = [r['expected_defaults'] for r in rating_results]
+            z_scores = [r['z_score'] for r in rating_results]
+            
+            figure_data = {
+                'x': list(range(len(rating_results))),  # x-positions for ratings
+                'y': observed_defaults,  # Observed defaults
+                'y_expected': expected_defaults,  # Expected defaults
+                'z_scores': z_scores,  # Z-scores for each rating
+                'rating_labels': rating_labels,  # Rating labels for x-axis
+                'n_obs': n_obs_values,  # Number of observations for reference
+                'title': f'Normal Test by Rating Grade ({confidence_level*100:.0f}% CL, {"Passed" if overall_passed else "Failed"})',
+                'xlabel': 'Rating Grade',
+                'ylabel': 'Number of Defaults',
+                'plot_type': 'normal',  # Custom plot type for normal test
+                'annotations': [
+                    f'Confidence Level: {confidence_level*100:.0f}%',
+                    f'Test Result: {"Passed" if overall_passed else "Failed"}',
+                ],
+            }
+            
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=1.0 if overall_passed else 0.0,  # Binary pass/fail as value
+                passed=overall_passed,
+                details={
+                    'use_ratings': True,
+                    'confidence_level': confidence_level,
+                    'n_ratings': n_ratings,
+                    'rating_results': rating_results
+                },
+                figure_data=figure_data
+            )
+        else:
+            # Calculate observed defaults and expected defaults
+            n_obs = len(y_true)
+            n_defaults = int(np.sum(y_true))
+            expected_defaults = np.sum(y_pred)
+
+            # Calculate z-score for normal test
+            if n_obs > 0:
+                observed_dr = n_defaults / n_obs
+                expected_dr = expected_defaults / n_obs
+                se = np.sqrt(expected_dr * (1 - expected_dr) / n_obs) if n_obs > 1 else 1
+                z_score = (observed_dr - expected_dr) / se if se > 0 else 0
+
+                # Calculate p-value from z-score (one-sided test)
+                p_value = 1 - stats.norm.cdf(z_score)
+            else:
+                observed_dr = 0
+                expected_dr = 0
+                z_score = 0
+                p_value = 1.0
+
+            # Determine if test passes
+            passed = p_value > alpha
+
+            return MetricResult(
+                name=self.__class__.__name__,
+                value=p_value,  # p-value as the metric value
+                passed=passed,
+                details={
+                    'use_ratings': False,
+                    'confidence_level': confidence_level,
+                    'n_obs': int(n_obs),
+                    'n_defaults': int(n_defaults),
+                    'expected_defaults': float(expected_defaults),
+                    'observed_dr': float(observed_dr),
+                    'expected_dr': float(expected_dr),
+                    'z_score': float(z_score)
+                },
+                figure_data={
+                    'x': [0],  # Single point for overall portfolio
+                    'y': [n_defaults],  # Observed defaults
+                    'y_expected': [expected_defaults],  # Expected defaults
+                    'z_score': [z_score],  # Z-score
+                    'title': f'Normal Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
+                    'xlabel': 'Portfolio',
+                    'ylabel': 'Number of Defaults',
+                    'plot_type': 'normal',  # Custom plot type for normal test
+                    'annotations': [
+                        f'Confidence Level: {confidence_level*100:.0f}%',
+                        f'Observed Defaults: {n_defaults}',
+                        f'Expected Defaults: {expected_defaults:.1f}',
+                        f'Z-score: {z_score:.2f}',
+                        f'p-value: {p_value:.4f}',
+                    ],
+                }
+            )
+
+

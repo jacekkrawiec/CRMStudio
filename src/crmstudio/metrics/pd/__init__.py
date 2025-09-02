@@ -14,8 +14,8 @@ from .discrimination import (
 )
 
 from .calibration import (
-    HosmerLemeshow, CalibrationCurve, BrierScore,
-    ExpectedCalibrationError, PDCalibrationStats
+    HosmerLemeshow, CalibrationCurve, BrierScore, BinomialTest, 
+    NormalTest, JeffreysTest, ExpectedCalibrationError
 )
 
 # Will be imported in the future when implemented
@@ -31,9 +31,9 @@ __all__ = [
     'SpearmansRho', 'KSDistPlot', 'ScoreHistogram', 'PDLiftPlot', 'PDGainPlot',
     
     # Calibration metrics
-    'HosmerLemeshow', 'CalibrationCurve', 'BrierScore',
-    'ExpectedCalibrationError', 'PDCalibrationStats',
-    
+    'HosmerLemeshow', 'CalibrationCurve', 'BrierScore', 'ExpectedCalibrationError',
+    'BinomialTest', 'NormalTest', 'JeffreysTest',
+
     # Stability metrics - to be added in future
     # 'PSI', 'CSI', 'TemporalDriftDetection'
 ]
