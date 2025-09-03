@@ -8,4 +8,5 @@ build/
 .env
 notes.md
 *.png
-plan.chatmode.md
+*.chatmode.md
+.github/chatmodes/
