@@ -3,8 +3,8 @@ Probability of Default (PD) metrics for model validation.
 
 This package contains metrics for evaluating PD model performance, organized by:
 - discrimination.py: Metrics for assessing model's ability to distinguish between good and bad cases
-- calibration.py: Metrics for assessing accuracy of probability predictions and heterogeneity testing
-- stability.py (future): Metrics for assessing model stability over time
+- calibration.py: Metrics for assessing accuracy of probability predictions, heterogeneity testing, and concentration analysis
+- stability.py: Metrics for assessing model stability over time and rating transitions
 """
 
 from .discrimination import (
@@ -16,13 +16,12 @@ from .discrimination import (
 from .calibration import (
     HosmerLemeshow, CalibrationCurve, BrierScore, BinomialTest, 
     NormalTest, JeffreysTest, ExpectedCalibrationError,
-    HeterogeneityTest, SubgroupCalibrationTest, RatingHeterogeneityTest
+    RatingHeterogeneityTest, HerfindahlIndex
 )
 
-# Will be imported in the future when implemented
-# from .stability import (
-#     PSI, CSI, TemporalDriftDetection
-# )
+from .stability import (
+    PSI, CSI, TemporalDriftDetection, MigrationAnalysis, RatingStabilityAnalysis
+)
 
 # Export all classes
 __all__ = [
@@ -33,11 +32,9 @@ __all__ = [
     
     # Calibration metrics
     'HosmerLemeshow', 'CalibrationCurve', 'BrierScore', 'ExpectedCalibrationError',
-    'BinomialTest', 'NormalTest', 'JeffreysTest',
-    
-    # Heterogeneity metrics
-    'HeterogeneityTest', 'SubgroupCalibrationTest', 'RatingHeterogeneityTest',
+    'BinomialTest', 'NormalTest', 'JeffreysTest', 'RatingHeterogeneityTest',
+    'HerfindahlIndex',
 
-    # Stability metrics - to be added in future
-    # 'PSI', 'CSI', 'TemporalDriftDetection'
+    # Stability metrics
+    'PSI', 'CSI', 'TemporalDriftDetection', 'MigrationAnalysis', 'RatingStabilityAnalysis'
 ]

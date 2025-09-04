@@ -282,6 +282,8 @@ class BaseMetric(ABC, SubpopulationAnalysisMixin):
             # Remove 'y_true' and 'y_pred' from kwargs before passing to _compute_raw
             compute_kwargs = {k: v for k, v in kwargs.items() if k not in ('y_true', 'y_pred')}
             result = self._compute_raw(y_true=y_true, y_pred=y_pred, **compute_kwargs)  # note it's always a MetricResult object
+        else:
+            result = self._compute_raw(**kwargs)
 
         #apply threshold if exists
         if result.value is not None and result.threshold is None:

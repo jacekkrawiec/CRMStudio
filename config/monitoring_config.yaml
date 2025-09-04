@@ -1,0 +1,28 @@
+alerts: {threshold_breach: true}
+models:
+  pd_model:
+    metrics:
+    - name: auc
+      params: {threshold: 0.7}
+    - name: roc_curve
+      params: {}
+    - name: gini
+      params: {threshold: 0.4}
+    - name: ks_stat
+      params: {threshold: 0.3}
+    - name: hosmer_lemeshow
+      params: {n_bins: 10}
+    - name: calibration_curve
+      params: {}
+    - name: brier_score
+      params: {}
+    - name: jeffreys_test
+      params: {confidence_level: 0.95}
+    - name: herfindahl_index
+      params: {hi_threshold: 0.18}
+    - name: psi
+      params: {threshold: 0.25}
+    - name: temporal_drift
+      params: {significance_level: 0.05}
+    thresholds: {auc: 0.7, gini: 0.4, ks_stat: 0.3, psi: 0.25}
+reporting: {include_plots: true, output_format: html}

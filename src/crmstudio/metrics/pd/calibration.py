@@ -3,13 +3,14 @@ Calibration metrics for probability of default (PD) models.
 
 This module provides metrics for assessing the calibration quality of PD models,
 including Hosmer-Lemeshow test, Brier score, Expected Calibration Error (ECE),
-calibration curves, and heterogeneity testing.
+calibration curves, heterogeneity testing, and concentration metrics.
 
 The metrics in this module assess various aspects of model calibration:
 1. Overall calibration quality (Hosmer-Lemeshow, Brier score)
 2. Granular calibration assessment (ECE, calibration curves)
 3. Statistical tests for calibration (Binomial test, Normal test, Jeffreys test)
 4. Heterogeneity testing (calibration consistency across segments/subgroups)
+5. Concentration analysis (Herfindahl Index for rating grades)
 
 Based on EBA Supervisory handbook on the validation of IRB rating systems:
 https://www.eba.europa.eu/sites/default/files/document_library/Publications/Reports/2023/1061495/Supervisory%20handbook%20on%20the%20validation%20of%20IRB%20rating%20systems%20revised.pdf
@@ -1280,222 +1281,6 @@ class NormalTest(BaseMetric):
                 }
             )
 
-
-class HeterogeneityTest(BaseMetric):
-    """
-    Test for calibration heterogeneity across subpopulations in credit risk models.
-    
-    This test evaluates if a model's calibration is consistent across different segments
-    of the portfolio, highlighting potential issues with model specification or data quality
-    that may not be apparent when examining the entire portfolio.
-    
-    The test is based on comparing the observed vs expected default rates across different
-    segments using chi-squared statistics, extending the concept of the Hosmer-Lemeshow test
-    to explicitly focus on heterogeneity across business-meaningful segments.
-    
-    Null Hypothesis (H0): The model calibration is homogeneous across all segments; 
-                          any observed differences in calibration across segments 
-                          are due to random chance.
-    
-    Alternative Hypothesis (H1): There are statistically significant differences in model
-                                calibration across segments, indicating heterogeneity that
-                                cannot be explained by random chance.
-    
-    Interpretation Guidelines:
-        - A low p-value (typically < 0.05) indicates statistically significant evidence
-          against the null hypothesis, suggesting heterogeneity in calibration across segments.
-        
-        - A high p-value does not necessarily prove homogeneity, but rather indicates
-          insufficient evidence to reject homogeneity.
-        
-        - Review the per-segment details to identify which segments contribute most
-          to heterogeneity.
-        
-        - Consider the practical significance of the deviations in addition to statistical
-          significance.
-    
-    Regulatory Context:
-        - Basel Committee on Banking Supervision (BCBS) guidelines emphasize the importance
-          of model performance consistency across different segments of the portfolio.
-        
-        - European Banking Authority (EBA) IRB guidelines require institutions to analyze
-          the stability of risk estimates across different application segments.
-        
-        - ECB TRIM guidelines highlight the need to assess model performance across
-          different subpopulations to ensure the model is appropriate for all segments.
-    
-    References:
-        - D'Agostino, R., & Stephens, M. (1986). Goodness-of-fit techniques.
-        - Hosmer, D. W., & Lemeshow, S. (2000). Applied Logistic Regression.
-        - Basel Committee on Banking Supervision (2006). "Studies on the Validation
-          of Internal Rating Systems".
-    """
-    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
-        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
-    
-    def _compute_raw(self, y_true=None, y_pred=None, segments=None, **kwargs):
-        """
-        Compute the heterogeneity test across specified segments.
-        
-        Parameters
-        ----------
-        y_true : array-like
-            Binary target values (0 = non-default, 1 = default).
-        y_pred : array-like
-            Predicted probabilities of default.
-        segments : array-like
-            Segment identifiers for each observation. Could be categorical values
-            representing business segments, risk buckets, or any other meaningful
-            segmentation of the portfolio.
-            
-        Returns
-        -------
-        MetricResult
-            Results of the heterogeneity test, including:
-                - value: p-value of the test
-                - passed: boolean indicating whether heterogeneity is not statistically significant
-                - details: segment-level information and test statistics
-                - figure_data: data for visualization of observed vs expected default rates by segment
-        """
-        # Input validation
-        if segments is None:
-            raise ValueError("Segments parameter is required for heterogeneity testing")
-            
-        if len(y_true) != len(y_pred) or len(y_true) != len(segments):
-            raise ValueError("Input arrays must have the same length")
-        
-        # Convert inputs to numpy arrays
-        y_true = np.asarray(y_true)
-        y_pred = np.asarray(y_pred)
-        segments = np.asarray(segments)
-        
-        # Get parameters from config or use defaults
-        confidence_level = self._get_param("confidence_level", default=0.95)
-        min_obs_per_segment = self._get_param("min_obs_per_segment", default=30)
-        
-        # Create a DataFrame for easier analysis
-        df = pd.DataFrame({
-            'actual': y_true,
-            'predicted': y_pred,
-            'segment': segments
-        })
-        
-        # Calculate metrics by segment
-        segment_stats = []
-        valid_segments = []
-        excluded_segments = []
-        
-        for segment, group in df.groupby('segment'):
-            n_obs = len(group)
-            
-            # Skip segments with too few observations
-            if n_obs < min_obs_per_segment:
-                excluded_segments.append({
-                    'segment': segment,
-                    'n_obs': n_obs,
-                    'reason': f'Fewer than {min_obs_per_segment} observations'
-                })
-                continue
-                
-            n_defaults = group['actual'].sum()
-            expected_defaults = group['predicted'].sum()
-            
-            observed_dr = n_defaults / n_obs
-            expected_dr = expected_defaults / n_obs
-            
-            # Calculate contribution to chi-square statistic
-            if expected_defaults > 0 and expected_defaults < n_obs:
-                # For default events
-                chi2_default = ((n_defaults - expected_defaults) ** 2) / expected_defaults
-                # For non-default events
-                chi2_non_default = ((n_obs - n_defaults - (n_obs - expected_defaults)) ** 2) / (n_obs - expected_defaults)
-                chi2_contribution = chi2_default + chi2_non_default
-            else:
-                # Handle edge cases where expected defaults is 0 or equals n_obs
-                chi2_contribution = 0
-                warnings.warn(f"Segment {segment} has expected defaults of {expected_defaults} (0 or equal to observations), skipping chi-square calculation.")
-            
-            segment_stats.append({
-                'segment': segment,
-                'n_obs': n_obs,
-                'n_defaults': n_defaults,
-                'expected_defaults': expected_defaults,
-                'observed_dr': observed_dr,
-                'expected_dr': expected_dr,
-                'chi2_contribution': chi2_contribution,
-                'abs_deviation': abs(observed_dr - expected_dr),
-                'rel_deviation': abs(observed_dr - expected_dr) / expected_dr if expected_dr > 0 else np.nan
-            })
-            
-            valid_segments.append(segment)
-        
-        # If no valid segments or only one segment, cannot perform heterogeneity test
-        if len(valid_segments) <= 1:
-            warnings.warn("Insufficient valid segments for heterogeneity testing.")
-            return MetricResult(
-                name=self.__class__.__name__,
-                value=np.nan,
-                passed=None,
-                details={
-                    'confidence_level': confidence_level,
-                    'segments_analyzed': 0,
-                    'excluded_segments': excluded_segments,
-                    'segment_stats': segment_stats,
-                    'error': "Insufficient valid segments for heterogeneity testing"
-                }
-            )
-        
-        # Calculate overall chi-square statistic and p-value
-        overall_chi2 = sum(stat['chi2_contribution'] for stat in segment_stats)
-        degrees_of_freedom = len(valid_segments) - 1  # df = number of segments - 1
-        p_value = 1 - stats.chi2.cdf(overall_chi2, degrees_of_freedom)
-        
-        # Test result
-        alpha = 1 - confidence_level
-        passed = p_value >= alpha  # Null hypothesis: homogeneous calibration
-        
-        # Sort segments by absolute deviation for better result interpretation
-        segment_stats.sort(key=lambda x: x['abs_deviation'], reverse=True)
-        
-        # Prepare data for visualization
-        segments_for_plot = [str(stat['segment']) for stat in segment_stats]
-        observed_drs = [stat['observed_dr'] for stat in segment_stats]
-        expected_drs = [stat['expected_dr'] for stat in segment_stats]
-        abs_deviations = [stat['abs_deviation'] for stat in segment_stats]
-        
-        return MetricResult(
-            name=self.__class__.__name__,
-            value=p_value,  # p-value as the metric value
-            passed=passed,
-            details={
-                'confidence_level': confidence_level,
-                'segments_analyzed': len(valid_segments),
-                'excluded_segments': excluded_segments,
-                'chi2_statistic': float(overall_chi2),
-                'degrees_of_freedom': degrees_of_freedom,
-                'segment_stats': segment_stats
-            },
-            figure_data={
-                'x': segments_for_plot,
-                'y': observed_drs,
-                'y_expected': expected_drs,
-                'abs_deviation': abs_deviations,
-                'title': f'Calibration Heterogeneity Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
-                'xlabel': 'Segment',
-                'ylabel': 'Default Rate',
-                'plot_type': 'heterogeneity',
-                'annotations': [
-                    f'Confidence Level: {confidence_level*100:.0f}%',
-                    f'Chi-Square: {overall_chi2:.2f}',
-                    f'Degrees of Freedom: {degrees_of_freedom}',
-                    f'p-value: {p_value:.4f}',
-                    f'Segments Analyzed: {len(valid_segments)}',
-                    f'Segments Excluded: {len(excluded_segments)}'
-                ],
-            }
-        )
-
-
 class RatingHeterogeneityTest(BaseMetric):
     """
     Test for assessing the heterogeneity between adjacent rating grades.
@@ -1761,61 +1546,63 @@ class RatingHeterogeneityTest(BaseMetric):
             }
         )
 
-
-class SubgroupCalibrationTest(BaseMetric):
+class RatingHomogeneityTest(BaseMetric):
     """
-    Test for calibration consistency within subgroups of a credit risk model portfolio.
+    Test for rating homogeneity across different segments within a single rating grade.
     
-    This test is designed to identify potential issues with model calibration for specific
-    subgroups that may be subject to regulatory scrutiny or business concerns, such as
-    different geographic regions, customer segments, or product types.
+    This test evaluates whether default rates are consistent across different segments
+    within the same rating grade. A homogeneous rating grade should have similar default
+    rates across all segments, regardless of other characteristics (e.g., PD, region, etc.).
     
-    Unlike the HeterogeneityTest which focuses on overall heterogeneity across segments,
-    this test provides detailed calibration assessment for each specified subgroup against
-    a benchmark or expected calibration.
+    The test operates by taking one rating grade at a time, splitting it into subbuckets
+    (usually based on predicted PD), and checking if there are significant differences
+    in observed default rates across these subbuckets.
     
-    Null Hypothesis (H0): For each subgroup, the model's calibration is consistent with
-                          the expected calibration, and any observed differences are
-                          due to random chance.
+    Null Hypothesis (H0): Default rates within a rating grade are homogeneous across
+                          different segments; any observed differences are due to 
+                          random chance.
     
-    Alternative Hypothesis (H1): For at least one subgroup, there is a statistically
-                                significant difference between observed and expected
-                                calibration that cannot be explained by random chance.
+    Alternative Hypothesis (H1): There are statistically significant differences in
+                                default rates within a rating grade across different
+                                segments, indicating heterogeneity.
     
     Interpretation Guidelines:
-        - A low p-value for a specific subgroup indicates potential calibration issues
-          for that subgroup.
-        
-        - Consider both statistical significance and the magnitude of calibration differences.
-        
-        - Evaluate the proportion of subgroups with calibration issues to assess the
-          overall model quality.
-        
-        - Investigate the characteristics of problematic subgroups to identify potential
-          model weaknesses.
+        - A low p-value indicates statistically significant evidence against homogeneity
+          within the rating grade, suggesting that the rating assignment may be influenced
+          by factors not fully captured in the model.
+          
+        - High p-values suggest consistency in default rates within the rating grade,
+          which is generally desirable.
+          
+        - If a rating grade shows significant heterogeneity, it may indicate issues with
+          rating assignment criteria or potential biases in different segments.
     
     Regulatory Context:
-        - BCBS Guidance emphasizes the importance of assessing model performance for 
-          meaningful subsets of exposures.
-        
-        - ECB TRIM guidelines require the analysis of model performance across different
-          application segments.
-        
-        - EBA guidelines stress the need to ensure models perform consistently across
-          different types of exposures.
+        - Basel Committee on Banking Supervision guidance requires that a rating system
+          must group obligors with similar risk characteristics in the same grade.
+          
+        - EBA guidelines on PD estimation require institutions to analyze whether the risk
+          drivers and rating criteria allow for a meaningful differentiation of risk.
+          
+        - ECB TRIM guidelines emphasize the need for homogeneity within rating grades to
+          ensure consistent risk quantification.
     
     References:
-        - Blochwitz, S., et al. (2005). "Myth and reality of discriminatory power for 
-          rating systems." Wilmott Magazine.
+        - Basel Committee on Banking Supervision (2006). "International Convergence of 
+          Capital Measurement and Capital Standards: A Revised Framework," paragraph 410.
+          
+        - European Banking Authority (2017). "Guidelines on PD estimation, LGD estimation
+          and the treatment of defaulted exposures," EBA/GL/2017/16, section 4.2.
+          
         - Basel Committee on Banking Supervision (2005). "Studies on validation of
-          internal rating systems."
+          internal rating systems," Working Paper No. 14, Section 3.2.
     """
     def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
         super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
 
-    def _compute_raw(self, y_true=None, y_pred=None, subgroups=None, reference_calibration=None, **kwargs):
+    def _compute_raw(self, y_true=None, y_pred=None, ratings=None, n_buckets=None, **kwargs):
         """
-        Compute calibration test for each specified subgroup.
+        Compute homogeneity test for each rating grade.
         
         Parameters
         ----------
@@ -1823,171 +1610,419 @@ class SubgroupCalibrationTest(BaseMetric):
             Binary target values (0 = non-default, 1 = default).
         y_pred : array-like
             Predicted probabilities of default.
-        subgroups : array-like
-            Subgroup identifiers for each observation.
-        reference_calibration : Dict, optional
-            Reference calibration to compare against. If None, the overall portfolio
-            calibration is used as reference.
+        ratings : array-like
+            Rating grade assignments for each observation. This parameter is required.
+        n_buckets : int, optional
+            Number of buckets to split each rating grade into based on predicted PD.
+            If not provided, will use a reasonable default based on sample size.
             
         Returns
         -------
         MetricResult
-            Results of the subgroup calibration test, including:
-                - value: proportion of subgroups with acceptable calibration
-                - passed: boolean indicating whether all significant subgroups have acceptable calibration
-                - details: subgroup-level calibration information and test statistics
-                - figure_data: data for visualization of calibration by subgroup
+            Results of the rating homogeneity test, including:
+                - value: proportion of rating grades with homogeneous default rates
+                - passed: boolean indicating whether all rating grades show homogeneity
+                - details: rating-level statistics and test results
+                - figure_data: data for visualization of homogeneity within rating grades
         """
         # Input validation
-        if subgroups is None:
-            raise ValueError("Subgroups parameter is required for subgroup calibration testing")
+        if ratings is None:
+            raise ValueError("Ratings parameter is required for rating homogeneity testing")
             
-        if len(y_true) != len(y_pred) or len(y_true) != len(subgroups):
+        if len(y_true) != len(y_pred) or len(y_true) != len(ratings):
             raise ValueError("Input arrays must have the same length")
         
         # Convert inputs to numpy arrays
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
-        subgroups = np.asarray(subgroups)
+        ratings = np.asarray(ratings)
         
         # Get parameters from config or use defaults
         confidence_level = self._get_param("confidence_level", default=0.95)
-        min_obs_per_subgroup = self._get_param("min_obs_per_subgroup", default=50)
+        min_obs_per_bucket = self._get_param("min_obs_per_bucket", default=20)
+        min_obs_per_rating = self._get_param("min_obs_per_rating", default=100)
+        
+        # Determine number of buckets if not provided
+        if n_buckets is None:
+            # Default to 5 buckets, but adjust based on sample size
+            n_buckets = self._get_param("n_buckets", default=5)
         
         # Create a DataFrame for easier analysis
         df = pd.DataFrame({
             'actual': y_true,
             'predicted': y_pred,
-            'subgroup': subgroups
+            'rating': ratings
         })
         
-        # Calculate overall calibration if no reference provided
-        if reference_calibration is None:
-            total_defaults = df['actual'].sum()
-            total_expected = df['predicted'].sum()
-            total_obs = len(df)
-            overall_observed_dr = total_defaults / total_obs
-            overall_expected_dr = total_expected / total_obs
-            reference_calibration = {
-                'observed_dr': overall_observed_dr,
-                'expected_dr': overall_expected_dr
-            }
+        # Get unique ratings
+        unique_ratings = np.unique(ratings)
         
-        # Calculate metrics by subgroup
-        subgroup_stats = []
-        excluded_subgroups = []
+        # Test each rating grade for homogeneity
+        rating_results = []
+        excluded_ratings = []
+        overall_passed = True
         
-        for subgroup, group in df.groupby('subgroup'):
-            n_obs = len(group)
+        for rating in unique_ratings:
+            # Filter data for this rating grade
+            rating_df = df[df['rating'] == rating].copy()
+            n_obs = len(rating_df)
             
-            # Skip subgroups with too few observations
-            if n_obs < min_obs_per_subgroup:
-                excluded_subgroups.append({
-                    'subgroup': subgroup,
+            # Skip ratings with too few observations
+            if n_obs < min_obs_per_rating:
+                excluded_ratings.append({
+                    'rating': rating,
                     'n_obs': n_obs,
-                    'reason': f'Fewer than {min_obs_per_subgroup} observations'
+                    'reason': f'Fewer than {min_obs_per_rating} observations'
                 })
                 continue
-                
-            n_defaults = group['actual'].sum()
-            expected_defaults = group['predicted'].sum()
             
-            observed_dr = n_defaults / n_obs
-            expected_dr = expected_defaults / n_obs
+            # Calculate overall default rate for this rating
+            n_defaults = rating_df['actual'].sum()
+            overall_dr = n_defaults / n_obs
             
-            # Calculate statistical significance
-            # Using binomial test to compare observed defaults with expected defaults
-            p_value = stats.binom_test(
-                n_defaults, 
-                n_obs, 
-                expected_dr, 
-                alternative='two-sided'
+            # Skip ratings with no defaults or all defaults (no variability to test)
+            if overall_dr == 0 or overall_dr == 1:
+                excluded_ratings.append({
+                    'rating': rating,
+                    'n_obs': n_obs,
+                    'overall_dr': overall_dr,
+                    'reason': 'No variability in default rate (all 0 or all 1)'
+                })
+                continue
+            
+            # Create buckets based on predicted PD
+            rating_df['bucket'] = pd.qcut(
+                rating_df['predicted'], 
+                q=n_buckets, 
+                labels=False, 
+                duplicates='drop'
             )
             
-            # Calculate effect size
-            effect_size = abs(observed_dr - expected_dr)
-            relative_effect = effect_size / expected_dr if expected_dr > 0 else np.nan
+            # Calculate statistics by bucket
+            bucket_stats = []
+            valid_buckets = []
+            n_valid_buckets = 0
             
-            # Determine if calibration is acceptable
+            for bucket, bucket_df in rating_df.groupby('bucket'):
+                bucket_n_obs = len(bucket_df)
+                
+                # Skip buckets with too few observations
+                if bucket_n_obs < min_obs_per_bucket:
+                    continue
+                
+                bucket_n_defaults = bucket_df['actual'].sum()
+                bucket_dr = bucket_n_defaults / bucket_n_obs
+                bucket_avg_pd = bucket_df['predicted'].mean()
+                
+                bucket_stats.append({
+                    'bucket': int(bucket),
+                    'n_obs': int(bucket_n_obs),
+                    'n_defaults': int(bucket_n_defaults),
+                    'default_rate': float(bucket_dr),
+                    'avg_pd': float(bucket_avg_pd),
+                })
+                
+                valid_buckets.append(bucket)
+                n_valid_buckets += 1
+            
+            # Skip ratings with fewer than 2 valid buckets
+            if n_valid_buckets < 2:
+                excluded_ratings.append({
+                    'rating': rating,
+                    'n_obs': n_obs,
+                    'reason': f'Fewer than 2 valid buckets after applying minimum observation threshold'
+                })
+                continue
+            
+            # Perform chi-square test for homogeneity of default rates across buckets
+            # Create contingency table: rows = buckets, columns = [defaults, non-defaults]
+            contingency_table = np.array([
+                [stat['n_defaults'], stat['n_obs'] - stat['n_defaults']]
+                for stat in bucket_stats
+            ])
+            
+            # Perform chi-square test
+            chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+            
+            # Determine if test passes (null hypothesis of homogeneity not rejected)
             alpha = 1 - confidence_level
-            statistically_significant = p_value < alpha
-            calibration_acceptable = not statistically_significant
+            passed = p_value >= alpha
             
-            subgroup_stats.append({
-                'subgroup': subgroup,
-                'n_obs': n_obs,
-                'n_defaults': n_defaults,
-                'expected_defaults': expected_defaults,
-                'observed_dr': observed_dr,
-                'expected_dr': expected_dr,
-                'p_value': p_value,
-                'effect_size': effect_size,
-                'relative_effect': relative_effect,
-                'statistically_significant': statistically_significant,
-                'calibration_acceptable': calibration_acceptable
+            # Update overall test result
+            if not passed:
+                overall_passed = False
+            
+            # Calculate metrics for visualization
+            min_dr = min(stat['default_rate'] for stat in bucket_stats)
+            max_dr = max(stat['default_rate'] for stat in bucket_stats)
+            range_dr = max_dr - min_dr
+            relative_range = range_dr / overall_dr if overall_dr > 0 else np.nan
+            
+            rating_results.append({
+                'rating': rating,
+                'n_obs': int(n_obs),
+                'n_defaults': int(n_defaults),
+                'overall_dr': float(overall_dr),
+                'n_buckets': int(n_valid_buckets),
+                'chi2_statistic': float(chi2),
+                'degrees_of_freedom': int(dof),
+                'p_value': float(p_value),
+                'min_dr': float(min_dr),
+                'max_dr': float(max_dr),
+                'range_dr': float(range_dr),
+                'relative_range': float(relative_range),
+                'passed': bool(passed),
+                'bucket_stats': bucket_stats
             })
         
-        # If no valid subgroups, cannot perform test
-        if not subgroup_stats:
-            warnings.warn("No valid subgroups for calibration testing.")
-            return MetricResult(
-                name=self.__class__.__name__,
-                value=np.nan,
-                passed=None,
-                details={
-                    'confidence_level': confidence_level,
-                    'reference_calibration': reference_calibration,
-                    'excluded_subgroups': excluded_subgroups,
-                    'error': "No valid subgroups for calibration testing"
-                }
-            )
+        # Calculate final result
+        valid_ratings_count = len(rating_results)
+        homogeneous_ratings_count = sum(1 for result in rating_results if result['passed'])
+        proportion_homogeneous = homogeneous_ratings_count / valid_ratings_count if valid_ratings_count > 0 else np.nan
         
-        # Calculate overall result
-        valid_subgroups_count = len(subgroup_stats)
-        acceptable_calibration_count = sum(1 for stat in subgroup_stats if stat['calibration_acceptable'])
-        proportion_acceptable = acceptable_calibration_count / valid_subgroups_count
+        # Prepare visualization data
+        ratings_for_plot = [str(result['rating']) for result in rating_results]
+        p_values = [result['p_value'] for result in rating_results]
+        relative_ranges = [result['relative_range'] for result in rating_results]
+        n_obs_values = [result['n_obs'] for result in rating_results]
+        passed_values = [result['passed'] for result in rating_results]
         
-        # Test is passed if all subgroups have acceptable calibration
-        passed = proportion_acceptable == 1.0
-        
-        # Sort subgroups by effect size for better result interpretation
-        subgroup_stats.sort(key=lambda x: x['effect_size'], reverse=True)
-        
-        # Prepare data for visualization
-        subgroups_for_plot = [str(stat['subgroup']) for stat in subgroup_stats]
-        observed_drs = [stat['observed_dr'] for stat in subgroup_stats]
-        expected_drs = [stat['expected_dr'] for stat in subgroup_stats]
-        p_values = [stat['p_value'] for stat in subgroup_stats]
-        significant = [stat['statistically_significant'] for stat in subgroup_stats]
+        # Create detailed buckets data for visualization
+        buckets_data = []
+        for result in rating_results:
+            rating = result['rating']
+            for bucket in result['bucket_stats']:
+                buckets_data.append({
+                    'rating': str(rating),
+                    'bucket': bucket['bucket'],
+                    'default_rate': bucket['default_rate'],
+                    'avg_pd': bucket['avg_pd'],
+                    'n_obs': bucket['n_obs']
+                })
         
         return MetricResult(
             name=self.__class__.__name__,
-            value=proportion_acceptable,  # Proportion of subgroups with acceptable calibration
-            passed=passed,
+            value=proportion_homogeneous,  # Proportion of homogeneous rating grades
+            passed=overall_passed,
             details={
                 'confidence_level': confidence_level,
-                'reference_calibration': reference_calibration,
-                'subgroups_analyzed': valid_subgroups_count,
-                'subgroups_acceptable': acceptable_calibration_count,
-                'proportion_acceptable': proportion_acceptable,
-                'excluded_subgroups': excluded_subgroups,
-                'subgroup_stats': subgroup_stats
+                'ratings_analyzed': valid_ratings_count,
+                'homogeneous_ratings': homogeneous_ratings_count,
+                'proportion_homogeneous': proportion_homogeneous,
+                'excluded_ratings': excluded_ratings,
+                'rating_results': rating_results,
+                'buckets_data': buckets_data
             },
             figure_data={
-                'x': subgroups_for_plot,
-                'y': observed_drs,
-                'y_expected': expected_drs,
-                'p_values': p_values,
-                'significant': significant,
-                'title': f'Subgroup Calibration Test ({confidence_level*100:.0f}% CL, {"Passed" if passed else "Failed"})',
-                'xlabel': 'Subgroup',
-                'ylabel': 'Default Rate',
-                'plot_type': 'subgroup_calibration',
+                'x': ratings_for_plot,
+                'y': p_values,
+                'relative_ranges': relative_ranges,
+                'n_obs': n_obs_values,
+                'passed': passed_values,
+                'buckets_data': buckets_data,
+                'title': f'Rating Homogeneity Test ({confidence_level*100:.0f}% CL, {"Passed" if overall_passed else "Failed"})',
+                'xlabel': 'Rating Grade',
+                'ylabel': 'p-value',
+                'plot_type': 'rating_homogeneity',
                 'annotations': [
                     f'Confidence Level: {confidence_level*100:.0f}%',
-                    f'Subgroups Analyzed: {valid_subgroups_count}',
-                    f'Subgroups with Acceptable Calibration: {acceptable_calibration_count} ({proportion_acceptable*100:.0f}%)',
-                    f'Subgroups Excluded: {len(excluded_subgroups)}'
+                    f'Ratings Analyzed: {valid_ratings_count}',
+                    f'Homogeneous Ratings: {homogeneous_ratings_count}/{valid_ratings_count} ({proportion_homogeneous*100:.0f}%)',
+                    f'Ratings Excluded: {len(excluded_ratings)}',
+                    f'Result: {"Passed" if overall_passed else "Failed"}'
                 ],
             }
         )
+
+
+class HerfindahlIndex(BaseMetric):
+    """
+    Calculate the Herfindahl Index for rating grade concentration.
+    
+    The Herfindahl Index (HI) is a measure of concentration used to assess
+    whether exposures are too concentrated in certain rating grades. According
+    to ECB guidelines on validation reporting (p. 26), institutions should monitor
+    the concentration of exposures across rating grades.
+    
+    The index is calculated as the sum of squared proportions of exposures in each
+    rating grade. A higher value indicates greater concentration, with 1 being the
+    maximum (all exposures in a single grade) and 1/N being the minimum (exposures
+    equally distributed across all N grades).
+    
+    HI = Σ(s_i^2) where s_i is the proportion of exposures in rating grade i
+    
+    Interpretation Guidelines:
+        - HI = 1: Maximum concentration (all exposures in one rating grade)
+        - HI = 1/N: Minimum concentration (exposures equally distributed across N grades)
+        - Higher values indicate greater concentration risk
+        
+    The normalized Herfindahl Index (HI*) is also calculated, which ranges from 0 to 1:
+        - HI* = (HI - 1/N) / (1 - 1/N)
+        - HI* = 0: Perfect diversification
+        - HI* = 1: Maximum concentration
+    
+    Regulatory Context:
+        - ECB Instructions on validation reporting: "... institutions should analyse
+          the portfolio composition by rating grades in order to identify possible
+          excessive concentrations... for example... using the Herfindahl index" (p. 26)
+        - High concentration in certain grades may indicate issues with the rating
+          process or model calibration
+    
+    References:
+        - European Central Bank (2019). "Instructions for reporting the validation results
+          of internal models," Section 2.5.3.3, p. 26.
+        - Basel Committee on Banking Supervision (2005). "Studies on validation of
+          internal rating systems," Working Paper No. 14, Section 3.1.1.
+    """
+    def __init__(self, model_name: str, config=None, config_path=None, **kwargs):
+        super().__init__(model_name, metric_type="calibration", config=config, config_path=config_path, **kwargs)
+    
+    def _compute_raw(self, ratings=None, exposures=None, **kwargs):
+        """
+        Calculate the Herfindahl Index for rating grade concentration.
+        
+        Parameters
+        ----------
+        ratings : array-like
+            Rating grade assignments for each observation.
+        exposures : array-like, optional
+            Exposure values for each observation. If not provided, each observation
+            is given equal weight (exposure=1).
+            
+        Returns
+        -------
+        MetricResult
+            Results of the Herfindahl Index calculation, including:
+                - value: Herfindahl Index value
+                - details: normalized index, grade-level statistics
+                - figure_data: data for visualization of rating distribution
+        """
+        # Input validation
+        if ratings is None:
+            raise ValueError("Ratings parameter is required for Herfindahl Index calculation")
+        
+        # Convert inputs to numpy arrays
+        ratings = np.asarray(ratings)
+        
+        # If exposures not provided, use equal weights
+        if exposures is None:
+            exposures = np.ones_like(ratings, dtype=float)
+        else:
+            exposures = np.asarray(exposures, dtype=float)
+            
+            if len(ratings) != len(exposures):
+                raise ValueError("Ratings and exposures arrays must have the same length")
+        
+        # Get threshold for concentration warning
+        hi_threshold = self._get_param("hi_threshold", default=0.18)  # Common threshold for moderate concentration
+        
+        # Get unique ratings
+        unique_ratings = np.unique(ratings)
+        n_ratings = len(unique_ratings)
+        
+        # Calculate total exposure
+        total_exposure = np.sum(exposures)
+        
+        if total_exposure <= 0:
+            raise ValueError("Total exposure must be positive")
+        
+        # Calculate exposure by rating grade
+        rating_stats = []
+        
+        for rating in unique_ratings:
+            mask = ratings == rating
+            rating_exposure = np.sum(exposures[mask])
+            rating_proportion = rating_exposure / total_exposure
+            
+            rating_stats.append({
+                'rating': rating,
+                'exposure': float(rating_exposure),
+                'proportion': float(rating_proportion),
+                'squared_proportion': float(rating_proportion ** 2)
+            })
+        
+        # Sort rating stats by proportion (descending)
+        rating_stats = sorted(rating_stats, key=lambda x: x['proportion'], reverse=True)
+        
+        # Calculate Herfindahl Index
+        hi = sum(stat['squared_proportion'] for stat in rating_stats)
+        
+        # Calculate minimum possible HI (equal distribution)
+        min_hi = 1 / n_ratings if n_ratings > 0 else 1
+        
+        # Calculate normalized Herfindahl Index (ranges from 0 to 1)
+        # HI* = (HI - 1/N) / (1 - 1/N)
+        if n_ratings > 1:
+            hi_normalized = (hi - min_hi) / (1 - min_hi)
+        else:
+            hi_normalized = 1.0  # If only one rating, maximum concentration
+        
+        # Determine if concentration is concerning
+        passed = hi <= hi_threshold
+        
+        # Calculate additional metrics
+        top_3_concentration = sum(stat['proportion'] for stat in rating_stats[:min(3, len(rating_stats))])
+        top_5_concentration = sum(stat['proportion'] for stat in rating_stats[:min(5, len(rating_stats))])
+        
+        # Prepare data for visualization
+        ratings_for_plot = [str(stat['rating']) for stat in rating_stats]
+        proportions = [stat['proportion'] for stat in rating_stats]
+        
+        # Calculate effective number of rating grades
+        # This represents how many equally-sized grades would give the same HI
+        effective_n = 1 / hi if hi > 0 else n_ratings
+        
+        return MetricResult(
+            name=self.__class__.__name__,
+            value=hi,  # Herfindahl Index as the metric value
+            threshold=hi_threshold,
+            passed=passed,
+            details={
+                'n_ratings': n_ratings,
+                'hi_normalized': float(hi_normalized),
+                'min_hi': float(min_hi),
+                'effective_n': float(effective_n),
+                'top_3_concentration': float(top_3_concentration),
+                'top_5_concentration': float(top_5_concentration),
+                'rating_stats': rating_stats,
+                'concentration_category': self._get_concentration_category(hi_normalized)
+            },
+            figure_data={
+                'x': ratings_for_plot,
+                'y': proportions,
+                'title': f'Rating Grade Concentration (HI = {hi:.4f}, {"Passed" if passed else "Failed"})',
+                'xlabel': 'Rating Grade',
+                'ylabel': 'Proportion of Total Exposure',
+                'plot_type': 'concentration',
+                'annotations': [
+                    f'Herfindahl Index: {hi:.4f}',
+                    f'Normalized HI: {hi_normalized:.4f}',
+                    f'Effective # of Grades: {effective_n:.1f} of {n_ratings}',
+                    f'Concentration: {self._get_concentration_category(hi_normalized)}',
+                    f'Top 3 Concentration: {top_3_concentration:.1%}',
+                ],
+            }
+        )
+    
+    def _get_concentration_category(self, hi_normalized):
+        """
+        Categorize the concentration level based on the normalized Herfindahl Index.
+        
+        Parameters
+        ----------
+        hi_normalized : float
+            Normalized Herfindahl Index value (0-1)
+            
+        Returns
+        -------
+        str
+            Concentration category description
+        """
+        if hi_normalized < 0.15:
+            return "Low Concentration"
+        elif hi_normalized < 0.25:
+            return "Moderate Concentration"
+        elif hi_normalized < 0.40:
+            return "High Concentration"
+        else:
+            return "Very High Concentration"

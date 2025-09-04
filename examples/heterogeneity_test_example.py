@@ -1,97 +1,16 @@
 """
-Example demonstrating the use of heterogeneity testing for credit risk models.
+NOTICE: THIS EXAMPLE IS CURRENTLY DISABLED
 
-This example shows how to use the HeterogeneityTest and SubgroupCalibrationTest
-classes to assess calibration consistency across different subpopulations in a 
-credit risk model portfolio.
+The HeterogeneityTest and SubgroupCalibrationTest classes have been temporarily
+removed and are being refactored. They will be re-implemented in a future release
+with improved functionality and a more modular design.
+
+This example will be updated once the new implementation is available.
 """
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_auc_score
-
-from crmstudio.metrics.pd import (
-    HeterogeneityTest, SubgroupCalibrationTest, 
-    AUC, ROCCurve, CalibrationCurve
-)
-
-# Create sample data with different segments
-np.random.seed(42)
-
-# Sample size
-n_samples = 2000
-
-# Create 3 segments with different calibration properties
-segments = np.random.choice(['A', 'B', 'C'], size=n_samples, p=[0.5, 0.3, 0.2])
-
-# Base probabilities for each observation
-base_probs = np.random.beta(2, 5, size=n_samples)
-
-# Adjust probabilities by segment to create heterogeneity
-pd_by_segment = {
-    'A': base_probs,  # Well-calibrated segment
-    'B': base_probs * 0.7,  # Under-predicting segment
-    'C': base_probs * 1.3   # Over-predicting segment
-}
-
-# Generate predicted probabilities based on segment
-y_pred = np.array([pd_by_segment[s][i] for i, s in enumerate(segments)])
-
-# Generate actual defaults (with intentional miscalibration in segments B and C)
-def generate_defaults(probs, segment):
-    if segment == 'A':
-        return np.random.binomial(1, probs)  # Well-calibrated
-    elif segment == 'B':
-        return np.random.binomial(1, probs * 1.4)  # More defaults than predicted
-    else:  # segment C
-        return np.random.binomial(1, probs * 0.8)  # Fewer defaults than predicted
-
-y_true = np.array([generate_defaults(y_pred[i], segments[i]) for i in range(n_samples)])
-
-# Print basic statistics
-print("Dataset Statistics:")
-print(f"Total observations: {n_samples}")
-print(f"Overall default rate: {y_true.mean():.2%}")
-print(f"Average predicted PD: {y_pred.mean():.2%}")
-print(f"AUC: {roc_auc_score(y_true, y_pred):.4f}")
-
-# Statistics by segment
-print("\nSegment Statistics:")
-for segment in ['A', 'B', 'C']:
-    mask = segments == segment
-    obs = mask.sum()
-    actual_dr = y_true[mask].mean()
-    pred_dr = y_pred[mask].mean()
-    print(f"Segment {segment}: {obs} obs, Actual DR: {actual_dr:.2%}, Predicted DR: {pred_dr:.2%}, Ratio: {actual_dr/pred_dr:.2f}")
-
-# Run standard validation metrics
-auc = AUC().compute(y_true, y_pred)
-roc = ROCCurve().compute(y_true, y_pred)
-cal = CalibrationCurve().compute(y_true, y_pred)
-
-print(f"\nOverall AUC: {auc.value:.4f}")
-print(f"CalibrationCurve MSE: {cal.value:.4f}")
-
-# Run heterogeneity test
-het_test = HeterogeneityTest().compute(y_true, y_pred, segments)
-
-print("\nHeterogeneity Test Results:")
-print(f"p-value: {het_test.value:.4f}")
-print(f"Test passed (homogeneous calibration): {het_test.passed}")
-print("\nSegment-level statistics:")
-for stat in het_test.details['segment_stats']:
-    print(f"Segment {stat['segment']}: Obs DR: {stat['observed_dr']:.2%}, Exp DR: {stat['expected_dr']:.2%}, " +
-          f"Abs Dev: {stat['abs_deviation']:.2%}, Chi2 Contrib: {stat['chi2_contribution']:.2f}")
-
-# Run subgroup calibration test
-subgroup_test = SubgroupCalibrationTest().compute(y_true, y_pred, segments)
-
-print("\nSubgroup Calibration Test Results:")
-print(f"Proportion of acceptable subgroups: {subgroup_test.value:.2%}")
-print(f"Test passed (all subgroups well-calibrated): {subgroup_test.passed}")
-print("\nSubgroup-level statistics:")
-for stat in subgroup_test.details['subgroup_stats']:
+print("NOTICE: HeterogeneityTest and SubgroupCalibrationTest functionality has been temporarily removed.")
+print("These classes are being refactored and will be re-implemented in a future release.")
+print("Please check the documentation for updates on when this functionality will be available.")
     print(f"Subgroup {stat['subgroup']}: Obs DR: {stat['observed_dr']:.2%}, Exp DR: {stat['expected_dr']:.2%}, " +
           f"p-value: {stat['p_value']:.4f}, Significant: {stat['statistically_significant']}")
 

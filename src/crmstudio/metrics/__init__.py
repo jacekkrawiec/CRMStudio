@@ -15,8 +15,11 @@ from .pd import (
     SpearmansRho, KSDistPlot, ScoreHistogram, PDLiftPlot, PDGainPlot,
     
     # Calibration metrics
-    HosmerLemeshow, CalibrationCurve, BrierScore,
-    ExpectedCalibrationError, PDCalibrationStats
+    HosmerLemeshow, CalibrationCurve, BrierScore, ExpectedCalibrationError,
+    BinomialTest, NormalTest, JeffreysTest, RatingHeterogeneityTest, HerfindahlIndex,
+    
+    # Stability metrics
+    PSI, CSI, TemporalDriftDetection, MigrationAnalysis, RatingStabilityAnalysis
 )
 
 # Import from other metrics modules
@@ -53,5 +56,16 @@ METRIC_REGISTRY = {
     "CalibrationCurve": CalibrationCurve,
     "BrierScore": BrierScore,
     "ExpectedCalibrationError": ExpectedCalibrationError,
-    "PDCalibrationStats": PDCalibrationStats,
+    "BinomialTest": BinomialTest,
+    "NormalTest": NormalTest,
+    "JeffreysTest": JeffreysTest,
+    "RatingHeterogeneityTest": RatingHeterogeneityTest,
+    "HerfindahlIndex": HerfindahlIndex,
+    
+    # Stability metrics
+    "PSI": PSI,
+    "CSI": CSI,
+    "TemporalDriftDetection": TemporalDriftDetection,
+    "MigrationAnalysis": MigrationAnalysis,
+    "RatingStabilityAnalysis": RatingStabilityAnalysis
 }

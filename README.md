@@ -85,22 +85,126 @@ ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
 - PD Calibration Stats (comprehensive calibration assessment)
 - Binomial and Normal tests for overall calibration
 - Jeffreys test for rating-based calibration
+- Herfindahl Index for rating grade concentration
 
 #### Heterogeneity Testing
 - Heterogeneity test for calibration consistency across segments
 - Subgroup calibration test for detailed subpopulation analysis
 - Statistical hypothesis testing for identifying problematic segments
 
+#### Concentration Analysis
+- Herfindahl Index for rating grade concentration
+- Visualization of concentration across rating grades
+- Normalized concentration metrics
+
+#### Stability Metrics
+- Population Stability Index (PSI)
+- Characteristic Stability Index (CSI)
+- Temporal Drift Detection
+- Rating Migration Analysis
+- Rating Stability Analysis
+
 ### Coming Soon
-- Stability metrics (PSI, CSI)
 - LGD and EAD/CCF metrics
 - Report generation
-- Monitoring pipeline
+
+## Monitoring Pipeline
+
+CRMStudio provides a comprehensive monitoring pipeline that allows you to run all metrics in one go, generate reports, and trigger alerts based on thresholds.
+
+### Pipeline Configuration
+
+Create a YAML configuration file with all your models and metrics:
+
+```yaml
+models:
+  pd_model:
+    metrics:
+      # Discrimination metrics
+      - name: auc
+        params:
+          threshold: 0.7
+      - name: roc_curve
+        params: {}
+      
+      # Calibration metrics  
+      - name: hosmer_lemeshow
+        params:
+          n_bins: 10
+      - name: herfindahl_index
+        params:
+          hi_threshold: 0.18
+      
+      # Stability metrics
+      - name: psi
+        params:
+          threshold: 0.25
+    
+    thresholds:
+      auc: 0.7
+      gini: 0.4
+      psi: 0.25
+      
+reporting:
+  output_format: html
+  include_plots: true
+  
+alerts:
+  threshold_breach: true
+```
+
+### Running the Pipeline
+
+```python
+from crmstudio.monitoring.pipeline import MonitoringPipeline
+
+# Initialize the pipeline with your configuration
+pipeline = MonitoringPipeline(config_path="config/monitoring_config.yaml")
+
+# Prepare your data dictionary with all required data for your metrics
+data = {
+    "pd_model": {
+        "y_true": y_true,  # True labels
+        "y_pred": y_pred,  # Predicted probabilities
+        "ratings": ratings,  # Rating grades
+        "exposures": exposures,  # Exposures for rating-based metrics
+        
+        # Stability metrics data
+        "reference_scores": reference_scores,
+        "recent_scores": recent_scores,
+        "reference_data": reference_features_df,
+        "recent_data": recent_features_df,
+        # Add any additional data required by your selected metrics
+    }
+}
+
+# Run the pipeline
+results = pipeline.run(
+    data=data,
+    save_results=True,  # Save results to JSON
+    generate_report=True  # Generate HTML report
+)
+
+# Check for alerts
+if pipeline.alerts:
+    print("Alerts triggered:")
+    for alert in pipeline.alerts:
+        print(f"  {alert['model']} - {alert['metric']}: {alert['message']}")
+
+# Access individual metric results
+auc_result = results["pd_model"]["auc"]["result"]
+print(f"AUC: {auc_result.value:.4f} - {'PASSED' if auc_result.passed else 'FAILED'}")
+```
+
+### Example Script
+
+See the `examples/monitoring_pipeline_example.py` file for a complete example of how to use the monitoring pipeline with all metrics.
 
 ## Example
 
 ```python
-from crmstudio.metrics.pd import HosmerLemeshow, HeterogeneityTest
+from crmstudio.metrics.pd.discrimination import AUC, ROCCurve, Gini
+from crmstudio.metrics.pd.calibration import HosmerLemeshow, HeterogeneityTest
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression

@@ -1,0 +1,10 @@
+[
+  {
+    "model": "pd_model",
+    "metric": "psi",
+    "value": 0.8811762064071182,
+    "threshold": 0.25,
+    "passed": false,
+    "timestamp": "20250903_160044"
+  }
+]

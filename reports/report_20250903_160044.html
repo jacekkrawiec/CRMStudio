@@ -1,0 +1,189 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>CRMStudio Monitoring Report - 20250903_160044</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1, h2, h3 { color: #333366; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
+                .passed { color: green; }
+                .failed { color: red; }
+                .alerts { background-color: #fff0f0; padding: 10px; border-left: 5px solid #ff0000; }
+                .metric-value { font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <h1>CRMStudio Monitoring Report</h1>
+            <p>Generated on: 2025-09-03 16:00:48</p>
+        
+            <div class="alerts">
+                <h2>Alerts</h2>
+                <table>
+                    <tr>
+                        <th>Model</th>
+                        <th>Metric</th>
+                        <th>Value</th>
+                        <th>Threshold</th>
+                        <th>Status</th>
+                    </tr>
+            
+                <tr>
+                    <td>pd_model</td>
+                    <td>psi</td>
+                    <td class="metric-value">0.8812</td>
+                    <td>0.2500</td>
+                    <td class="failed">FAILED</td>
+                </tr>
+                
+                </table>
+            </div>
+            
+            <h2>Model: pd_model</h2>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                    <th>Threshold</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                </tr>
+            
+                <tr>
+                    <td>auc</td>
+                    <td class="metric-value">0.7060</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td>n_obs: 1000<br>n_defaults: 113<br></td>
+                </tr>
+                
+                <tr>
+                    <td>roc_curve</td>
+                    <td class="metric-value">0.7060</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_roc_curve_20250903_160044.png" alt="roc_curve plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>gini</td>
+                    <td class="metric-value">0.4120</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td>n_obs: 1000<br>n_defaults: 113<br></td>
+                </tr>
+                
+                <tr>
+                    <td>ks_stat</td>
+                    <td class="metric-value">0.3779</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td>n_obs: 1000<br>n_defaults: 113<br></td>
+                </tr>
+                
+                <tr>
+                    <td>hosmer_lemeshow</td>
+                    <td class="metric-value">0.0000</td>
+                    <td>0.0500</td>
+                    <td class="failed">FAILED</td>
+                    <td>test_statistic: 15032.3832<br>degrees_of_freedom: 7<br>n_bins: 9<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_hosmer_lemeshow_20250903_160044.png" alt="hosmer_lemeshow plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>calibration_curve</td>
+                    <td class="metric-value">0.3979</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td>use_ratings: True<br>n_ratings: 9<br>n_obs: 1000<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_calibration_curve_20250903_160044.png" alt="calibration_curve plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>brier_score</td>
+                    <td class="metric-value">0.3976</td>
+                    <td>N/A</td>
+                    <td class="">N/A</td>
+                    <td>n_obs: 1000<br>n_defaults: 113<br>baseline_brier: 0.1002<br></td>
+                </tr>
+                
+                <tr>
+                    <td>jeffreys_test</td>
+                    <td class="metric-value">0.0000</td>
+                    <td>N/A</td>
+                    <td class="failed">FAILED</td>
+                    <td>use_ratings: True<br>confidence_level: 0.9500<br>n_ratings: 9<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_jeffreys_test_20250903_160044.png" alt="jeffreys_test plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>herfindahl_index</td>
+                    <td class="metric-value">0.1879</td>
+                    <td>0.1800</td>
+                    <td class="failed">FAILED</td>
+                    <td>n_ratings: 9<br>hi_normalized: 0.0864<br>min_hi: 0.1111<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_herfindahl_index_20250903_160044.png" alt="herfindahl_index plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>psi</td>
+                    <td class="metric-value">0.8812</td>
+                    <td>0.1000</td>
+                    <td class="failed">FAILED</td>
+                    <td>n_ref: 800<br>n_recent: 800<br>stability_category: Significantly Shifted<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_psi_20250903_160044.png" alt="psi plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+                <tr>
+                    <td>temporal_drift</td>
+                    <td class="metric-value">1.0000</td>
+                    <td>N/A</td>
+                    <td class="failed">FAILED</td>
+                    <td>metric_name: AUC<br>n_time_points: 24<br>trend_results: {'trend_detected': True, 'trend_direction': 'Decreasing', 'p_value': 7.34357432641275e-08, 'z_statistic': -5.3825554525098696, 'slope': -0.003503489509064834, 'intercept': 0.8468748899977974, 'r_squared': 0.8508174583294927, 'future_prediction': 0.7627911417802413, 'concerning_drift': True}<br></td>
+                </tr>
+                
+                        <tr>
+                            <td colspan="5" style="text-align: center;">
+                                <img src="pd_model_temporal_drift_20250903_160044.png" alt="temporal_drift plot" style="max-width: 100%;">
+                            </td>
+                        </tr>
+                        
+            </table>
+            
+        </body>
+        </html>
+        

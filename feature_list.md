@@ -2,7 +2,13 @@
 
 ## 1. Data Input & Management
 
-- [ ] Load credit risk data from CSV, Parquet, Excel
+- [ ] Load credit r## 5. Reporting Module
+
+- [x] Generate HTML reports with charts & tables
+- [ ] PDF export for regulatory submissions
+- [x] Include data quality, model performance, drift analysis in one report
+- [ ] Configurable report templates (customizable branding & layout)
+- [x] Automated summary section with "Pass/Warning/Fail" flagsa from CSV, Parquet, Excel
 - [ ] Schema validation (expected columns, types)
 - [ ] Metadata management (model ID, run timestamp, dataset version)
 - [ ] Synthetic dataset generator for testing & demos
@@ -48,11 +54,17 @@
 - [x] Subgroup calibration test for detailed subpopulation analysis
 - [x] Statistical hypothesis testing for identifying problematic segments
 
-#### 3.1.4 Stability Metrics
-- [ ] Population Stability Index (PSI)
-- [ ] Characteristic Stability Index (CSI)
-- [ ] Distribution drift detection
-- [ ] PD model performance tracking over time
+#### 3.1.4 Concentration Analysis
+- [x] Herfindahl Index for rating grade concentration
+- [ ] Top-N concentration metrics
+- [ ] Lorenz curve and Gini coefficient for concentration
+
+#### 3.1.5 Stability Metrics
+- [x] Population Stability Index (PSI)
+- [x] Characteristic Stability Index (CSI)
+- [x] Temporal Drift Detection
+- [x] Rating Migration Analysis
+- [x] Rating Stability Analysis
 - [ ] Simple out-of-time validation framework
 
 ### 3.2 LGD Model Metrics (Planned)
@@ -70,11 +82,11 @@
 
 ## 4. Model Monitoring & Validation
 
-- [ ] Config-driven monitoring pipelines (YAML/JSON)
-- [ ] Threshold-based alerts for KPI drift
+- [x] Config-driven monitoring pipelines (YAML/JSON)
+- [x] Threshold-based alerts for KPI drift
 - [ ] Multi-period trend analysis (time series of metrics)
 - [ ] Historical run comparison and plots
-- [ ] CLI and Python API for automation
+- [x] Python API for automation
 - [ ] Custom validator integration (extensible plugin system)
 
 ## 5. Reporting Module

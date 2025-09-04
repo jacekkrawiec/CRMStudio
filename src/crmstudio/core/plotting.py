@@ -162,7 +162,8 @@ class PlottingService:
         metric_result : MetricResult
             MetricResult object containing data for visualization
         plot_type : str, optional
-            The type of plot ('curve', 'distribution', 'calibration'). If None, will be detected from data.
+            The type of plot ('curve', 'distribution', 'calibration', 'psi', 'csi',
+            'drift', 'migration', 'rating_stability'). If None, will be detected from data.
             
         Returns
         -------
@@ -183,6 +184,10 @@ class PlottingService:
                         plot_type = 'scalar'
                     elif metric_result.is_curve_data():
                         plot_type = 'curve'
+                    elif 'plot_type' in datasets[0]:
+                        # Get plot_type from the first dataset if available
+                        first_data = next(iter(datasets[0].values()))
+                        plot_type = first_data.get('plot_type', 'distribution')
                     else:
                         plot_type = 'distribution'
                 
@@ -198,6 +203,24 @@ class PlottingService:
                 elif plot_type == 'distribution':
                     # create as many subplots as there are elements in datasets list
                     fig, ax = self._plot_distribution(datasets)
+                elif plot_type == 'psi':
+                    # Population Stability Index plot
+                    fig, ax = self._plot_psi(datasets)
+                elif plot_type == 'csi':
+                    # Characteristic Stability Index plot
+                    fig, ax = self._plot_csi(datasets)
+                elif plot_type == 'drift':
+                    # Temporal Drift Detection plot
+                    fig, ax = self._plot_drift(datasets)
+                elif plot_type == 'migration':
+                    # Migration Analysis plot
+                    fig, ax = self._plot_migration(datasets)
+                elif plot_type == 'rating_stability':
+                    # Rating Stability Analysis plot
+                    fig, ax = self._plot_rating_stability(datasets)
+                elif plot_type == 'concentration':
+                    # Concentration (Herfindahl Index) plot
+                    fig, ax = self._plot_concentration(datasets)
                 else:
                     raise ValueError(f"Unknown plot type: {plot_type}")
             else:
@@ -473,6 +496,94 @@ class PlottingService:
                             ax.text(x[i] + bar_width/2, y_expected[i] + 0.05*y_max, f'{y_expected[i]:.1f}', 
                                    ha='center', va='bottom', fontsize=9)
                     
+                    # Rating Heterogeneity Test plot - default rates across rating grades with significance markers
+                    elif data.get('plot_type') == 'rating_heterogeneity':
+                        # Get data from the dataset
+                        x = data['x']  # Rating grades
+                        y = data['y']  # Default rates
+                        n_obs = data.get('n_obs', [100] * len(x))  # Sample sizes for marker scaling
+                        significant_markers = data.get('significant_markers', [None] * len(x))  # Significance markers
+                        
+                        # Plot default rates as a line with markers
+                        line = ax.plot(x, y, 'o-', markersize=8, label='Default Rate', zorder=3)
+                        line_color = line[0].get_color()
+                        
+                        # Adjust y-axis to show percentages
+                        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.1%}'))
+                        
+                        # Add significance markers between ratings
+                        for i in range(len(x) - 1):
+                            if significant_markers[i] is not None:
+                                x_mid = (i + i + 1) / 2
+                                y_mid = (y[i] + y[i+1]) / 2
+                                color = 'green' if significant_markers[i] else 'red'
+                                marker = '✓' if significant_markers[i] else '✗'
+                                ax.plot([i, i+1], [y[i], y[i+1]], '-', color=color, alpha=0.5, linewidth=2)
+                                ax.text(x_mid, y_mid, marker, 
+                                       ha='center', va='center', fontsize=12, color=color,
+                                       bbox=dict(boxstyle="circle", fc="white", ec=color, alpha=0.8))
+                        
+                        # Set x-axis labels
+                        ax.set_xticks(range(len(x)))
+                        ax.set_xticklabels(x, rotation=45, ha='right')
+                        
+                        # Add second y-axis for p-values if provided
+                        if 'p_values' in data:
+                            ax2 = ax.twinx()
+                            ax2.plot(range(len(x) - 1), data['p_values'], 'r--', alpha=0.6, label='p-value')
+                            ax2.set_ylabel('p-value')
+                            ax2.grid(False)
+                        
+                        # Add a legend
+                        ax.legend(loc='upper left')
+                        
+                        # Set y limits to include all data with padding
+                        y_max = max(y) * 1.2
+                        ax.set_ylim([0, min(1, y_max)])
+                    
+                    # Rating Homogeneity Test plot - p-values and relative ranges by rating grade
+                    elif data.get('plot_type') == 'rating_homogeneity':
+                        # Get data from the dataset
+                        x = data['x']  # Rating grades
+                        y = data['y']  # p-values
+                        relative_ranges = data.get('relative_ranges', [0] * len(x))  # Relative ranges
+                        passed = data.get('passed', [True] * len(x))  # Test results
+                        
+                        # Plot p-values as bars with color indicating test result
+                        colors = ['green' if p else 'red' for p in passed]
+                        ax.bar(range(len(x)), y, color=colors, alpha=0.7, label='p-value')
+                        
+                        # Add horizontal line at significance level (typically 0.05)
+                        alpha = 0.05  # Assuming standard 95% confidence level
+                        ax.axhline(y=alpha, color='red', linestyle='--', alpha=0.8, label=f'α = {alpha}')
+                        
+                        # Set x-axis labels
+                        ax.set_xticks(range(len(x)))
+                        ax.set_xticklabels(x, rotation=45, ha='right')
+                        
+                        # Add second y-axis for relative ranges if provided
+                        if len(relative_ranges) == len(x):
+                            ax2 = ax.twinx()
+                            ax2.plot(range(len(x)), relative_ranges, 'bo-', alpha=0.6, label='Relative Range')
+                            ax2.set_ylabel('Relative Range of Default Rates')
+                            ax2.grid(False)
+                            
+                            # Add legend for second y-axis
+                            lines, labels = ax2.get_legend_handles_labels()
+                            ax.legend(loc='upper left')
+                            ax2.legend(lines, labels, loc='upper right')
+                        else:
+                            ax.legend(loc='best')
+                        
+                        # Plot sub-bucket data if available
+                        if 'buckets_data' in data:
+                            # Check if we need a second figure for detailed bucket view
+                            buckets_data = data['buckets_data']
+                            if buckets_data and len(buckets_data) > 0:
+                                # We could create a secondary visualization here for bucket details
+                                # But for now, we'll just add annotations on the main plot
+                                pass
+                    
                     else:
                         # Standard curve plot for Hosmer-Lemeshow and calibration curves
                         ax.plot(
@@ -512,7 +623,7 @@ class PlottingService:
                         ax.set_ylim(data['ylim'])
                     else:
                         # For calibration plots, often want 0-1 range on both axes
-                        if data.get('plot_type') != 'hosmer_lemeshow':
+                        if data.get('plot_type') not in ['hosmer_lemeshow', 'rating_heterogeneity', 'rating_homogeneity', 'binomial']:
                             ax.set_xlim([0, 1])
                             ax.set_ylim([0, 1])
                     
@@ -522,7 +633,10 @@ class PlottingService:
                     if data.get('use_percentage_ticks_y', False):
                         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
                     
-                    ax.legend(loc='best')
+                    # Add legend if not already added for special cases
+                    if data.get('plot_type') not in ['rating_homogeneity']:
+                        ax.legend(loc='best')
+                        
                     ax.grid(True, linestyle='--', alpha=0.3)
         
         return fig, axs[0]
@@ -544,3 +658,498 @@ class PlottingService:
         img_data = base64.b64decode(image_data["image_base64"])
         with open(filepath, "wb") as f:
             f.write(img_data)
+            
+    def _plot_psi(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot Population Stability Index (PSI) visualization.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of datasets to plot, each containing PSI data
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects with the rendered plot
+        """
+        with self._figure_context(figsize=(10, 6)) as (fig, ax):
+            # We expect a single dataset for PSI
+            dataset = datasets[0]
+            data = next(iter(dataset.values()))
+            
+            # Get the bin information
+            x = data.get('x', [])  # Bin numbers
+            y_ref = data.get('y_ref', [])  # Reference proportions
+            y_recent = data.get('y_recent', [])  # Recent proportions
+            bin_psi = data.get('bin_psi', [])  # PSI contributions by bin
+            bin_edges = data.get('bin_edges', [])  # Bin boundaries
+            
+            # Plot proportions as bars
+            bar_width = 0.35
+            ax.bar(np.array(x) - bar_width/2, y_ref, bar_width, label='Reference', alpha=0.7, color='blue')
+            ax.bar(np.array(x) + bar_width/2, y_recent, bar_width, label='Recent', alpha=0.7, color='orange')
+            
+            # Add a second axis for PSI contributions
+            ax2 = ax.twinx()
+            
+            # Plot PSI contributions as a line
+            ax2.plot(x, bin_psi, 'r-o', label='PSI Contribution')
+            
+            # Set axis labels and title
+            ax.set_xlabel(data.get('xlabel', 'Score/PD Bins'))
+            ax.set_ylabel(data.get('ylabel', 'Proportion of Population'))
+            ax2.set_ylabel('PSI Contribution')
+            ax.set_title(data.get('title', 'Population Stability Index (PSI)'))
+            
+            # Set x-ticks to bin boundaries if available
+            if bin_edges and len(bin_edges) > 1:
+                # Calculate midpoints for tick labels
+                midpoints = [(bin_edges[i] + bin_edges[i+1])/2 for i in range(len(bin_edges)-1)]
+                ax.set_xticks(x)
+                ax.set_xticklabels([f'{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}' for i in range(len(bin_edges)-1)], 
+                                  rotation=45, ha='right')
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                y_pos = 0.02
+                for annotation in data['annotations']:
+                    ax.annotate(
+                        annotation, 
+                        xy=(0.02, y_pos), 
+                        xycoords='axes fraction',
+                        fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+                    )
+                    y_pos += 0.06  # Move up for next annotation
+            
+            # Add legends for both axes
+            ax.legend(loc='upper left')
+            ax2.legend(loc='upper right')
+            
+            # Set grid
+            ax.grid(True, linestyle='--', alpha=0.3)
+            
+        return fig, ax
+    
+    def _plot_csi(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot Characteristic Stability Index (CSI) visualization.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of datasets to plot, each containing CSI data
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects with the rendered plot
+        """
+        with self._figure_context(figsize=(10, 6)) as (fig, ax):
+            # We expect a single dataset for CSI
+            dataset = datasets[0]
+            data = next(iter(dataset.values()))
+            
+            # Get the variable data
+            x = data.get('x', [])  # Variable names
+            y = data.get('y', [])  # CSI values
+            threshold = data.get('threshold', 0.1)  # CSI threshold
+            
+            # Create horizontal bar chart for CSI values
+            bars = ax.barh(x, y, alpha=0.7)
+            
+            # Color bars based on threshold
+            for i, bar in enumerate(bars):
+                if y[i] >= 0.2:  # Red for significant shift
+                    bar.set_color('red')
+                elif y[i] >= 0.1:  # Yellow/orange for moderate shift
+                    bar.set_color('orange')
+                else:  # Green for stable
+                    bar.set_color('green')
+            
+            # Add threshold line
+            ax.axvline(x=threshold, color='red', linestyle='--', alpha=0.7, 
+                      label=f'Threshold ({threshold})')
+            
+            # Add a more strict threshold line at 0.2
+            ax.axvline(x=0.2, color='darkred', linestyle=':', alpha=0.7, 
+                      label='Critical (0.2)')
+            
+            # Set axis labels and title
+            ax.set_xlabel('CSI Value')
+            ax.set_ylabel('Variables')
+            ax.set_title(data.get('title', 'Characteristic Stability Index (CSI)'))
+            
+            # Add value labels to the bars
+            for i, v in enumerate(y):
+                ax.text(v + 0.01, i, f'{v:.3f}', va='center')
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                y_pos = 0.02
+                for annotation in data['annotations']:
+                    ax.annotate(
+                        annotation, 
+                        xy=(0.02, y_pos), 
+                        xycoords='axes fraction',
+                        fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+                    )
+                    y_pos += 0.06  # Move up for next annotation
+            
+            # Add legend
+            ax.legend()
+            
+            # Set grid
+            ax.grid(True, linestyle='--', alpha=0.3)
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+        return fig, ax
+    
+    def _plot_drift(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot Temporal Drift Detection visualization.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of datasets to plot, each containing drift data
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects with the rendered plot
+        """
+        with self._figure_context(figsize=(10, 6)) as (fig, ax):
+            # We expect a single dataset for drift detection
+            dataset = datasets[0]
+            data = next(iter(dataset.values()))
+            
+            # Get the time series data
+            x = data.get('x', [])  # Time points
+            y = data.get('y', [])  # Metric values
+            trend_line = data.get('trend_line', [])  # Trend line
+            future_point = data.get('future_point', [])  # Future prediction
+            
+            # Plot the actual metric values over time
+            ax.plot(x, y, 'o-', label=data.get('ylabel', 'Performance Metric'), linewidth=2)
+            
+            # Plot trend line if available
+            if trend_line and len(trend_line) == len(x):
+                ax.plot(x, trend_line, 'r--', label='Trend', alpha=0.7)
+            
+            # Plot future prediction point if available
+            if future_point and len(future_point) == 2:
+                next_x = future_point[0]
+                next_y = future_point[1]
+                ax.plot([next_x], [next_y], 'rx', markersize=10, label='Next Period Prediction')
+                
+                # Connect to the last actual point with a dotted line
+                if len(x) > 0 and len(y) > 0:
+                    ax.plot([x[-1], next_x], [y[-1], next_y], 'r:', alpha=0.5)
+            
+            # Set axis labels and title
+            ax.set_xlabel(data.get('xlabel', 'Time'))
+            ax.set_ylabel(data.get('ylabel', 'Performance Metric'))
+            ax.set_title(data.get('title', 'Temporal Drift Analysis'))
+            
+            # Format x-axis ticks for time series
+            if len(x) > 0 and isinstance(x[0], (str, pd.Timestamp, pd.Period)):
+                plt.xticks(rotation=45, ha='right')
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                y_pos = 0.02
+                for annotation in data['annotations']:
+                    ax.annotate(
+                        annotation, 
+                        xy=(0.02, y_pos), 
+                        xycoords='axes fraction',
+                        fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+                    )
+                    y_pos += 0.06  # Move up for next annotation
+            
+            # Add legend
+            ax.legend()
+            
+            # Set grid
+            ax.grid(True, linestyle='--', alpha=0.3)
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+        return fig, ax
+    
+    def _plot_migration(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot Rating Migration Matrix visualization.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of datasets to plot, each containing migration data
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects with the rendered plot
+        """
+        with self._figure_context(figsize=(10, 8)) as (fig, ax):
+            # We expect a single dataset for migration analysis
+            dataset = datasets[0]
+            data = next(iter(dataset.values()))
+            
+            # Get the migration matrix data
+            matrix = data.get('matrix', [])  # Migration probability matrix
+            rating_scale = data.get('rating_scale', [])  # Rating scale
+            
+            # Convert to numpy array if it's not already
+            matrix = np.array(matrix)
+            
+            # Create heatmap
+            im = ax.imshow(matrix, cmap='Blues', interpolation='nearest', vmin=0, vmax=1)
+            
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax)
+            cbar.set_label('Transition Probability')
+            
+            # Set axis labels and title
+            ax.set_xlabel(data.get('xlabel', 'Current Rating'))
+            ax.set_ylabel(data.get('ylabel', 'Initial Rating'))
+            ax.set_title(data.get('title', 'Rating Migration Matrix'))
+            
+            # Set tick labels to rating scale if provided
+            if rating_scale and len(rating_scale) == matrix.shape[0]:
+                ax.set_xticks(np.arange(len(rating_scale)))
+                ax.set_yticks(np.arange(len(rating_scale)))
+                ax.set_xticklabels(rating_scale)
+                ax.set_yticklabels(rating_scale)
+            
+            # Rotate the x-axis tick labels if needed
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+            
+            # Add text annotations in each cell
+            for i in range(matrix.shape[0]):
+                for j in range(matrix.shape[1]):
+                    # Color text based on background intensity for readability
+                    text_color = 'white' if matrix[i, j] > 0.5 else 'black'
+                    ax.text(j, i, f'{matrix[i, j]:.2f}', 
+                           ha="center", va="center", color=text_color,
+                           fontsize=9)
+            
+            # Add diagonal marker (stability pathway)
+            for i in range(min(matrix.shape[0], matrix.shape[1])):
+                ax.add_patch(plt.Rectangle((i - 0.5, i - 0.5), 1, 1, fill=False, 
+                                          edgecolor='red', linewidth=2, alpha=0.7))
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                y_pos = 0.02
+                for annotation in data['annotations']:
+                    ax.annotate(
+                        annotation, 
+                        xy=(0.02, y_pos), 
+                        xycoords='axes fraction',
+                        fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8)
+                    )
+                    y_pos += 0.06  # Move up for next annotation
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+        return fig, ax
+    
+    def _plot_rating_stability(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot Rating Stability Analysis visualization.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of datasets to plot, each containing rating stability data
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects with the rendered plot
+        """
+        with self._multi_figure_context(2, 1, figsize=(10, 10), gridspec_kw={'height_ratios': [1, 1.5]}) as (fig, axs):
+            # We expect a single dataset for rating stability
+            dataset = datasets[0]
+            data = next(iter(dataset.values()))
+            
+            # Get data for the top subplot (period-by-period change rates)
+            time_points = data.get('time_points', [])  # Time points
+            period_change_rates = data.get('period_change_rates', [])  # Change rates by period
+            
+            # Get data for the bottom subplot (distribution of change ratios)
+            change_ratios = data.get('change_ratios', [])  # Change ratios by obligor
+            
+            # Top plot: Period-by-period change rates
+            ax1 = axs[0]
+            if time_points and period_change_rates and len(time_points) == len(period_change_rates):
+                ax1.plot(time_points, period_change_rates, 'o-', linewidth=2, 
+                        label='Period Change Rate')
+                ax1.set_xlabel('Time Period')
+                ax1.set_ylabel('Change Rate')
+                ax1.set_title('Rating Changes by Period')
+                
+                # Format x-axis ticks for time series
+                if len(time_points) > 0 and isinstance(time_points[0], (str, pd.Timestamp, pd.Period)):
+                    plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
+                
+                # Add average line
+                if period_change_rates:
+                    avg_rate = np.mean(period_change_rates)
+                    ax1.axhline(y=avg_rate, color='r', linestyle='--', 
+                               label=f'Average: {avg_rate:.2f}')
+                
+                ax1.legend()
+                ax1.grid(True, linestyle='--', alpha=0.3)
+            else:
+                ax1.text(0.5, 0.5, 'No period-by-period data available', 
+                        ha='center', va='center', fontsize=12)
+                ax1.set_xticks([])
+                ax1.set_yticks([])
+            
+            # Bottom plot: Distribution of change ratios
+            ax2 = axs[1]
+            if change_ratios:
+                # Create histogram of change ratios
+                n, bins, patches = ax2.hist(change_ratios, bins=10, alpha=0.7, 
+                                           label='Obligor Change Ratios')
+                
+                # Add vertical lines for key statistics
+                if change_ratios:
+                    mean_ratio = np.mean(change_ratios)
+                    median_ratio = np.median(change_ratios)
+                    ax2.axvline(x=mean_ratio, color='r', linestyle='--', 
+                               label=f'Mean: {mean_ratio:.2f}')
+                    ax2.axvline(x=median_ratio, color='g', linestyle=':', 
+                               label=f'Median: {median_ratio:.2f}')
+                
+                ax2.set_xlabel('Change Ratio (Changes per Period)')
+                ax2.set_ylabel('Number of Obligors')
+                ax2.set_title('Distribution of Rating Changes Across Obligors')
+                ax2.legend()
+                ax2.grid(True, linestyle='--', alpha=0.3)
+                
+                # Add obligor statistics as text
+                if 'obligor_stats_summary' in data:
+                    stats = data['obligor_stats_summary']
+                    text = (
+                        f"Obligors with no changes: {stats.get('n_obligors_with_no_changes', 0)}\n"
+                        f"Obligors with one change: {stats.get('n_obligors_with_one_change', 0)}\n"
+                        f"Obligors with multiple changes: {stats.get('n_obligors_with_multiple_changes', 0)}"
+                    )
+                    ax2.text(0.95, 0.95, text, transform=ax2.transAxes, 
+                           verticalalignment='top', horizontalalignment='right',
+                           bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+            else:
+                ax2.text(0.5, 0.5, 'No change ratio data available', 
+                        ha='center', va='center', fontsize=12)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                y_pos = 0.02
+                for annotation in data['annotations']:
+                    fig.text(0.02, y_pos, annotation, fontsize=9,
+                           bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+                    y_pos += 0.06  # Move up for next annotation
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+        return fig, axs[0]
+        
+    def _plot_concentration(self, datasets: List[Dict[str, Any]]) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot concentration analysis (Herfindahl Index) for rating grades.
+        
+        This creates a bar chart showing the distribution of exposures across
+        rating grades, with annotations for concentration metrics.
+        
+        Parameters
+        ----------
+        datasets : List[Dict[str, Any]]
+            List of dictionaries containing data for visualization
+            
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes with the plotted data
+        """
+        with self._figure_context(figsize=(10, 6)) as (fig, ax):
+            # Extract data from the first dataset
+            data = next(iter(datasets[0].values()))
+            
+            # Extract variables needed for plotting
+            x = data.get('x', [])  # Rating labels
+            y = data.get('y', [])  # Proportions
+            title = data.get('title', 'Rating Grade Concentration')
+            xlabel = data.get('xlabel', 'Rating Grade')
+            ylabel = data.get('ylabel', 'Proportion of Total Exposure')
+            
+            # Create bar plot of proportions
+            bars = ax.bar(x, y, color='skyblue', alpha=0.8)
+            
+            # Highlight the bars with highest concentration
+            if len(bars) > 0:
+                # Highlight the top 3 most concentrated grades
+                top_indices = np.argsort(y)[-3:]
+                for idx in top_indices:
+                    if idx < len(bars):
+                        bars[idx].set_color('darkblue')
+                        bars[idx].set_alpha(0.9)
+            
+            # Add percentage labels on top of each bar
+            for bar in bars:
+                height = bar.get_height()
+                ax.annotate(f'{height:.1%}',
+                           xy=(bar.get_x() + bar.get_width() / 2, height),
+                           xytext=(0, 3),  # 3 points vertical offset
+                           textcoords="offset points",
+                           ha='center', va='bottom',
+                           fontsize=8)
+            
+            # Add a horizontal line for a perfectly even distribution
+            if len(x) > 0:
+                even_distribution = 1 / len(x)
+                ax.axhline(y=even_distribution, color='red', linestyle='--', 
+                          alpha=0.7, label=f'Even Distribution ({even_distribution:.1%})')
+            
+            # Set axis labels and title
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            
+            # Format y-axis as percentage
+            ax.yaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter(1.0))
+            
+            # Add annotations if provided
+            if 'annotations' in data:
+                annotation_text = '\n'.join(data['annotations'])
+                ax.text(0.02, 0.98, annotation_text, transform=ax.transAxes,
+                       verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", 
+                                                        fc="white", ec="gray", alpha=0.8),
+                       fontsize=9)
+            
+            # Add grid and legend
+            ax.grid(True, axis='y', linestyle='--', alpha=0.3)
+            ax.legend()
+            
+            # Rotate x-axis labels if there are many categories
+            if len(x) > 5:
+                plt.xticks(rotation=45, ha='right')
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+        return fig, ax

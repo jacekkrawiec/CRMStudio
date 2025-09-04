@@ -22,8 +22,8 @@ src/crmstudio/data/__init__.py
 src/crmstudio/data/loader.py
 src/crmstudio/metrics/__init__.py
 src/crmstudio/metrics/common_metrics.py
-src/crmstudio/metrics/lgd_metrics.py
-src/crmstudio/metrics/stability_metrics.py
+src/crmstudio/metrics/data_quality/__init__.py
+src/crmstudio/metrics/data_quality/dq_checks.py
 src/crmstudio/metrics/pd/__init__.py
 src/crmstudio/metrics/pd/calibration.py
 src/crmstudio/metrics/pd/discrimination.py

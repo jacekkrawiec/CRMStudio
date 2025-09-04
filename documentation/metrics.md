@@ -16,31 +16,29 @@
 ## PD
 
 # Calibration
-- [ ] Jeffreys test (source: ECB_MV_INSTRUCTION)
-- [ ] Brier Score (Source: OeNB)
-- [ ] Reliability Diagrams (Source: OeNB)
-- [ ] Normal Calibration Test (Source: OeNB)
-- [ ] Binomial Calibration Test (Source: OeNB)
-- [ ] Correlated Defaults Test (Source: OeNB)
-- [ ] Chi-square test (Source: BIS)
-- [ ] Hosmer-Lameshow
+- [x] Jeffreys test (source: ECB_MV_INSTRUCTION)
+- [x] Brier Score (Source: OeNB)
+- [x] Reliability Diagrams (Source: OeNB)
+- [x] Normal Calibration Test (Source: OeNB)
+- [x] Binomial Calibration Test (Source: OeNB)
+- [x] Hosmer-Lameshow
  
 # Discrimination
-- [ ] AUC (source: ECB_MV_INSTRUCTION)
-- [ ] Current AUC vs. AUC at inital validation/development (source: ECB_MV_INSTRUCTION)
-- [ ] ROC Curve (Source: OeNB)
-- [ ] Pietra Index (Source: OeNB)
-- [ ] KS_stat (Source: OeNB)
-- [ ] CAP Curve/Powercurve (Source: OeNB)
-- [ ] Gini (Source: OeNB)
-- [ ] Gini/AUC Confidence intervals (Source: OeNB)
-- [ ] ROC Curve (Source: OeNB)
-- [ ] Conditional Information Entropy Ratio (Source: OeNB)
+- [x] AUC (source: ECB_MV_INSTRUCTION)
+- [x] Current AUC vs. AUC at inital validation/development (source: ECB_MV_INSTRUCTION)
+- [x] ROC Curve (Source: OeNB)
+- [x] Pietra Index (Source: OeNB)
+- [x] KS_stat (Source: OeNB)
+- [x] CAP Curve/Powercurve (Source: OeNB)
+- [x] Gini (Source: OeNB)
+- [x] Gini/AUC Confidence intervals (Source: OeNB)
+- [x] ROC Curve (Source: OeNB)
+- [x] Conditional Information Entropy Ratio (Source: OeNB)
 - [ ] Kullback-Leibler distance (Source: BIS)
-- [ ] Information Value (Source: BIS)
-- [ ] Kendall's Tau/SommersD (Source: BIS)
-- [ ] Accuracy Ratio
-- [ ] Spearman's Rho
+- [x] Information Value (Source: BIS)
+- [x] Kendall's Tau/SommersD (Source: BIS)
+- [x] Accuracy Ratio
+- [x] Spearman's Rho
 
 # Stability
  - [ ] Customer migrations (MWB) (source: ECB_MV_INSTRUCTION)
