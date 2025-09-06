@@ -1,65 +1,121 @@
-# CRMStudio - IRB Model Monitoring Toolkit
+# CRMStudio - Credit Risk Model Studio
 
-CRMStudio is a Python package designed for monitoring IRB models (PD, LGD, EAD) locally within your bank infrastructure. It helps you run monitoring checks, evaluate metrics, trigger alerts, and generate reports — all **without sharing sensitive data externally**.
+CRMStudio is a Python package designed for credit risk model validation, monitoring, and impact analysis. It helps you validate models, run monitoring checks, evaluate metrics, and generate reports — all **without sharing sensitive data externally**.
 
-Attention: CRMStudio is in alpha stage, not everything is implemented yet. It is not yet available via pip, etc. For now it can be used for PD model evaluation including discrimination and calibration metrics. More features will be available soon.
----
+> **Note:** CRMStudio is currently undergoing a major restructuring to enhance usability and align with user workflows. The previous implementation has been preserved in the `obsolete` directory for reference.
 
-## Quickstart
+## New Structure and Vision
 
-Get started with CRMStudio in just a few steps:
+The new structure organizes the package around validation workflows rather than technical components:
 
-### 1. Install
-
-```bash
-pip install crmstudio
+```
+crmstudio/
+├── validation/        # High-level API for validation tasks
+│   ├── discrimination.py
+│   ├── calibration.py
+│   ├── stability.py
+│   ├── impact.py
+│   └── reporting.py
+├── metrics/           # Implementations of all metrics
+│   ├── discrimination/
+│   ├── calibration/
+│   ├── stability/
+│   └── impact/
+└── pipelines/         # Specialized validation workflows
+    ├── irb_validation.py
+    ├── annual_validation.py
+    └── model_monitoring.py
 ```
 
-### 2. Prepare Configuration
+### What's New?
 
-Create a YAML config (e.g., config/monitoring_config.yaml) specifying models, metrics, and thresholds:
+The restructured CRMStudio will feature:
 
-```yaml
-models:
-  pd_model:
-    metrics: 
-      - name: AUC
-        params:
-          threshold: 0.75
-      - name: HosmerLemeshow
-        params:
-          alpha: 0.05
-          n_bins: 10
-    thresholds:
-      psi: 0.25
-      gini: 0.6
-report:
-  output_dir: reports/
-  format: html
-```
+1. **User-Friendly API**: Intuitive functions organized around validation tasks
+2. **Rich Result Objects**: Comprehensive results with built-in visualization and reporting
+3. **Guided Workflows**: Specialized pipelines for common validation scenarios
+4. **Regulatory Focus**: Direct support for IRB application and annual validation
+5. **Business Impact**: Tools to measure the business impact of model changes
 
-### 3. Local Data
+## Implementation Plan
+
+1. **Phase 1: Core Restructuring**
+   - Implement core metrics infrastructure
+   - Create result objects with rich functionality
+   - Develop high-level validation API
+
+2. **Phase 2: Enhanced User Experience**
+   - Implement domain-specific configuration system
+   - Create specialized validation pipelines
+   - Develop improved visualization and reporting
+
+3. **Phase 3: Documentation and Examples**
+   - Create comprehensive documentation
+   - Develop real-world examples
+   - Create Jupyter notebook tutorials
+
+## Preview of New API
 
 ```python
-from crmstudio.data.loader import DataLoader
-data = DataLoader("data/pd_data.csv").load()
+# Before (old API)
+auc = AUC("my_model")
+gini = Gini("my_model")
+ks = KSStat("my_model")
+
+auc_result = auc.compute(y_true=defaults, y_pred=scores)
+gini_result = gini.compute(y_true=defaults, y_pred=scores)
+ks_result = ks.compute(y_true=defaults, y_pred=scores)
+
+print(f"AUC: {auc_result.value:.4f}")
+print(f"Gini: {gini_result.value:.4f}")
+print(f"KS: {ks_result.value:.4f}")
+
+# After (new API)
+from crmstudio.validation import discrimination
+
+# One-line call for comprehensive analysis
+result = discrimination.analyze_model_power(
+    y_true=defaults,
+    y_pred=scores,
+    segments=customer_segments
+)
+
+# Rich functionality in the result object
+result.summary()
+result.plot()
+result.export_report("discrimination_analysis.html")
 ```
 
-### 4. Run Monitoring
+## Specialized Validation Pipelines
 
 ```python
-from crmstudio.monitoring.pipeline import MonitoringPipeline
-MonitoringPipeline(config_path = "config/monitoring_config.yaml").run()
+from crmstudio.pipelines import IRBValidation
+
+# Create IRB validation pipeline
+irb_validator = IRBValidation(
+    model_name="Mortgage PD Model",
+    asset_class="mortgage",
+    config=config
+)
+
+# Run comprehensive IRB validation
+result = irb_validator.run(
+    development_data=dev_data,
+    validation_data=val_data,
+    application_data=app_data
+)
+
+# Generate IRB application documentation
+irb_validator.generate_documentation("irb_application_docs/")
 ```
 
-### 5. Generate Report
+## Contributing
 
-```python
-from crmstudio.reports.generator import ReportGenerator
-ReportGenerator(results_dir = 'results/', output_dir = 'results/').generate()
+Contributions are welcome! We are currently focused on implementing the new structure outlined above. Please see the full restructuring plan in the `documentation/restructuring.md` file for more details.
 
-- [x] Done! Your model metrics are calculated, alerts triggered if thresholds are exceeded, and reports are ready.
-```
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Features
 
